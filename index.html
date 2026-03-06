@@ -8,14 +8,14 @@
   body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: monospace; overflow: hidden; }
   canvas { border: 2px solid #333; display: block; }
   #ui { color: #fff; font-size: 13px; width: 800px; display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
-  #upgrade-screen {
+  .overlay {
     display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.85); color: #fff; flex-direction: column;
+    background: rgba(0,0,0,0.88); color: #fff; flex-direction: column;
     align-items: center; justify-content: center; z-index: 10;
   }
-  #upgrade-screen.show { display: flex; }
+  .overlay.show { display: flex; }
   #upgrade-screen h2 { font-size: 28px; margin-bottom: 8px; color: #ffd700; }
-  #upgrade-screen p { margin-bottom: 24px; color: #aaa; }
+  #upgrade-screen > p { margin-bottom: 24px; color: #aaa; }
   .upgrade-cards { display: flex; gap: 16px; }
   .upgrade-card {
     background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
@@ -26,26 +26,53 @@
   .upgrade-card .icon { font-size: 36px; margin-bottom: 8px; }
   .upgrade-card .name { font-size: 16px; font-weight: bold; margin-bottom: 6px; color: #ffd700; }
   .upgrade-card .desc { font-size: 12px; color: #bbb; }
+
+  #shop-screen h2 { font-size: 28px; margin-bottom: 6px; color: #ffd700; }
+  #shop-coins { font-size: 17px; color: #ffd700; margin-bottom: 18px; }
+  .shop-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .shop-item {
+    background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
+    padding: 14px; width: 148px; cursor: pointer; text-align: center;
+    transition: border-color 0.2s, transform 0.1s;
+  }
+  .shop-item:hover { border-color: #ffd700; transform: scale(1.05); }
+  .shop-item.cant-afford { opacity: 0.45; cursor: not-allowed; }
+  .shop-item.cant-afford:hover { transform: none; border-color: #444; }
+  .shop-item .s-icon { font-size: 28px; margin-bottom: 6px; }
+  .shop-item .s-name { font-size: 13px; font-weight: bold; color: #ffd700; margin-bottom: 4px; }
+  .shop-item .s-desc { font-size: 11px; color: #bbb; margin-bottom: 8px; }
+  .shop-item .s-cost { font-size: 14px; color: #ffd700; }
+  #shop-close { margin-top: 18px; padding: 8px 24px; background: #333; border: 1px solid #666; border-radius: 6px; color: #fff; cursor: pointer; font-size: 14px; font-family: monospace; }
+  #shop-close:hover { background: #555; }
+
   #gameover { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
     background: #111; border: 2px solid #e55; padding: 32px 48px; border-radius: 12px;
     text-align: center; color: #fff; z-index: 20; }
   #gameover h2 { color: #e55; font-size: 32px; margin-bottom: 12px; }
-  #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; }
+  #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; font-family: monospace; }
 </style>
 </head>
 <body>
 <div id="ui">
-  <span id="ui-left">LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
-  <span>COINS <span id="ui-coins">0</span> &nbsp; DIST <span id="ui-dist">0</span>m</span>
-  <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp; ATK <span id="ui-atk">1</span> &nbsp; JMP <span id="ui-jmp">1</span></span>
+  <span>LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
+  <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0</span>m &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
+  <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span> &nbsp;<span style="color:#aaa">[B]Shop</span></span>
 </div>
 <canvas id="c" width="800" height="440"></canvas>
 
-<div id="upgrade-screen">
+<div id="upgrade-screen" class="overlay">
   <h2>LEVEL UP!</h2>
   <p>Choose an upgrade:</p>
   <div class="upgrade-cards" id="upgrade-cards"></div>
 </div>
+
+<div id="shop-screen" class="overlay">
+  <h2>🛒 SHOP</h2>
+  <div id="shop-coins">🪙 <span id="shop-coin-count">0</span> coins</div>
+  <div class="shop-grid" id="shop-items"></div>
+  <button id="shop-close" onclick="closeShop()">Close [B / Esc]</button>
+</div>
+
 <div id="gameover">
   <h2>GAME OVER</h2>
   <p id="go-stats"></p>
@@ -57,110 +84,153 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 const GROUND = H - 60;
-const TILE = 40;
 
-// ---- State ----
-let state;
+// ---- Biomes (20) ----
+const BIOMES = [
+  { name:'Plains',        sky0:[26,26,74],    sky1:[17,17,24],   gnd:[42,74,26],    gndA:[74,138,58],  plt:[58,90,42],   pltA:[90,138,74],  bg:[40,60,40],   bgA:0.30 },
+  { name:'Mountain',      sky0:[26,42,90],    sky1:[10,10,32],   gnd:[74,74,74],    gndA:[110,110,110],plt:[90,90,90],   pltA:[140,140,140],bg:[80,80,110],  bgA:0.40 },
+  { name:'Jungle',        sky0:[10,42,10],    sky1:[5,16,5],     gnd:[26,74,10],    gndA:[58,138,26],  plt:[42,90,10],   pltA:[74,154,42],  bg:[20,80,10],   bgA:0.40 },
+  { name:'Volcano',       sky0:[74,10,0],     sky1:[26,5,0],     gnd:[42,10,10],    gndA:[106,26,0],   plt:[74,26,0],    pltA:[140,42,0],   bg:[120,20,0],   bgA:0.50 },
+  { name:'Snow',          sky0:[138,160,192], sky1:[192,208,232],gnd:[208,224,240], gndA:[232,240,255],plt:[192,208,232],pltA:[224,240,255],bg:[200,220,240],bgA:0.35 },
+  { name:'Beach',         sky0:[26,128,224],  sky1:[64,160,255], gnd:[212,176,96],  gndA:[232,200,112],plt:[208,160,80], pltA:[232,192,96], bg:[30,140,200], bgA:0.40 },
+  { name:'Fantasy',       sky0:[74,10,106],   sky1:[32,10,64],   gnd:[58,10,90],    gndA:[122,42,154], plt:[90,26,122],  pltA:[154,58,170], bg:[110,20,150], bgA:0.40 },
+  { name:'Mushroom Kingdom',sky0:[42,10,42],  sky1:[16,10,16],   gnd:[90,30,70],    gndA:[150,50,120], plt:[120,20,100], pltA:[180,60,150], bg:[150,40,110], bgA:0.40 },
+  { name:'Space',         sky0:[0,0,0],       sky1:[0,0,10],     gnd:[10,10,26],    gndA:[26,26,58],   plt:[10,26,58],   pltA:[42,58,106],  bg:[10,10,50],   bgA:0.50 },
+  { name:'Desert',        sky0:[138,90,0],    sky1:[180,110,0],  gnd:[192,144,64],  gndA:[212,168,80], plt:[176,128,48], pltA:[200,160,64], bg:[180,120,0],  bgA:0.40 },
+  { name:'Crystal Cave',  sky0:[0,26,42],     sky1:[0,42,58],    gnd:[10,42,58],    gndA:[26,90,106],  plt:[10,74,90],   pltA:[42,138,154], bg:[0,110,150],  bgA:0.40 },
+  { name:'Haunted Forest', sky0:[10,10,10],   sky1:[5,5,8],      gnd:[10,26,10],    gndA:[26,58,26],   plt:[10,42,10],   pltA:[26,74,26],   bg:[20,40,20],   bgA:0.55 },
+  { name:'Lava World',    sky0:[80,0,0],      sky1:[40,0,0],     gnd:[30,0,0],      gndA:[80,10,0],    plt:[64,0,0],     pltA:[110,26,0],   bg:[160,0,0],    bgA:0.50 },
+  { name:'Ice Cave',      sky0:[10,42,74],    sky1:[5,21,37],    gnd:[26,58,90],    gndA:[42,90,138],  plt:[26,74,106],  pltA:[58,122,170], bg:[20,80,150],  bgA:0.40 },
+  { name:'Cyber City',    sky0:[0,10,26],     sky1:[0,5,16],     gnd:[10,10,26],    gndA:[10,42,58],   plt:[0,26,42],    pltA:[0,58,90],    bg:[0,70,110],   bgA:0.45 },
+  { name:'Ancient Ruins', sky0:[42,26,0],     sky1:[21,13,0],    gnd:[58,42,16],    gndA:[90,74,32],   plt:[74,58,24],   pltA:[106,90,48],  bg:[80,60,20],   bgA:0.40 },
+  { name:'Cloud Kingdom', sky0:[106,154,224], sky1:[154,188,240],gnd:[224,232,248], gndA:[240,244,255],plt:[208,218,240],pltA:[232,240,255],bg:[200,220,255],bgA:0.45 },
+  { name:'Toxic Wasteland',sky0:[26,42,0],    sky1:[10,21,0],    gnd:[30,50,0],     gndA:[50,90,0],    plt:[30,64,0],    pltA:[50,100,0],   bg:[50,90,0],    bgA:0.50 },
+  { name:'Rainbow Land',  sky0:[200,0,100],   sky1:[100,0,200],  gnd:[200,100,0],   gndA:[255,220,0],  plt:[0,180,100],  pltA:[0,120,255],  bg:[255,100,200],bgA:0.40 },
+  { name:'Shadow Realm',  sky0:[0,0,0],       sky1:[8,0,8],      gnd:[10,0,10],     gndA:[26,0,26],    plt:[22,0,22],    pltA:[44,0,44],    bg:[50,0,50],    bgA:0.60 },
+];
 
-function createState() {
+function lerpRGB(a, b, t) {
+  return [Math.round(a[0]+(b[0]-a[0])*t), Math.round(a[1]+(b[1]-a[1])*t), Math.round(a[2]+(b[2]-a[2])*t)];
+}
+function rgb(a) { return `rgb(${a[0]},${a[1]},${a[2]})`; }
+function rgba(a, al) { return `rgba(${a[0]},${a[1]},${a[2]},${al})`; }
+
+function getBiome(distance) {
+  const len = 500;
+  const rawIdx = distance / len;
+  const idx = Math.floor(rawIdx);
+  const t = rawIdx - idx;
+  const blend = t > 0.7 ? (t - 0.7) / 0.3 : 0;
+  const cur = BIOMES[idx % 20];
+  const nxt = BIOMES[(idx + 1) % 20];
   return {
-    camera: 0,
-    distance: 0,
-    coins: 0,
-    paused: false,
-    dead: false,
-    hero: {
-      x: 120, y: GROUND, w: 28, h: 36,
-      vx: 0, vy: 0,
-      onGround: false,
-      facing: 1,
-      attackTimer: 0,
-      attackCooldown: 0,
-      invTimer: 0,
-      animFrame: 0, animTimer: 0,
-      // Stats
-      hp: 5, maxHp: 5,
-      lvl: 1, xp: 0, xpNext: 20,
-      atkPow: 1,
-      jumpPow: 1,   // multiplier: jump speed
-      speed: 1,
-    },
-    platforms: [],
-    coins: [],
-    enemies: [],
-    particles: [],
-    worldX: 0,  // how far world has been generated
-    keys: {},
-    frameCount: 0,
+    name:  blend > 0.4 ? nxt.name : cur.name,
+    sky0:  lerpRGB(cur.sky0, nxt.sky0, blend),
+    sky1:  lerpRGB(cur.sky1, nxt.sky1, blend),
+    gnd:   lerpRGB(cur.gnd,  nxt.gnd,  blend),
+    gndA:  lerpRGB(cur.gndA, nxt.gndA, blend),
+    plt:   lerpRGB(cur.plt,  nxt.plt,  blend),
+    pltA:  lerpRGB(cur.pltA, nxt.pltA, blend),
+    bg:    lerpRGB(cur.bg,   nxt.bg,   blend),
+    bgA:   cur.bgA + (nxt.bgA - cur.bgA) * blend,
+    isSpace: cur.name === 'Space' || cur.name === 'Shadow Realm',
   };
 }
 
-// ---- Upgrades ----
+// ---- Enemy tier colors ----
+const TIER_COLORS = {
+  walker:  ['#e06030','#c84020','#b02010','#8a0010'],
+  jumper:  ['#30b0e0','#2080c8','#1050a8','#002070'],
+  shooter: ['#c040e0','#a020c8','#7800a8','#4a0080'],
+  heavy:   ['#e04040','#c01010','#900000','#600000'],
+};
+
+// ---- Shop Items ----
+const SHOP_ITEMS = [
+  { icon:'⚔️',  name:'Damage Shard',  desc:'+2 Attack',         cost:20, apply: h => { h.atkPow += 2; }},
+  { icon:'🛡️',  name:'Shield Stone',  desc:'+1 Defense',         cost:25, apply: h => { h.defense += 1; }},
+  { icon:'💎',  name:'Life Crystal',  desc:'+5 Max HP & heal',   cost:18, apply: h => { h.maxHp += 5; h.hp = Math.min(h.hp+5, h.maxHp); }},
+  { icon:'👟',  name:'Speed Boots',   desc:'+0.4 Move speed',    cost:30, apply: h => { h.speed += 0.4; }},
+  { icon:'🧪',  name:'Full Elixir',   desc:'Restore all HP',     cost:12, apply: h => { h.hp = h.maxHp; }},
+  { icon:'🎯',  name:'Crit Gem',      desc:'+15% crit chance',   cost:35, apply: h => { h._crit = (h._crit||0) + 0.15; }},
+  { icon:'🦘',  name:'Jump Crystal',  desc:'+1 Jump power',      cost:22, apply: h => { h.jumpPow += 1; }},
+  { icon:'⭐',  name:'XP Tome',       desc:'+25% XP gain',       cost:28, apply: h => { h._xpMult = (h._xpMult||1) * 1.25; }},
+];
+
+// ---- Upgrade Pool ----
 const UPGRADE_POOL = [
-  { id:'hp',    icon:'❤️',  name:'Vitality',    desc:'+3 Max HP, full heal',  apply: h => { h.maxHp += 3; h.hp = h.maxHp; }},
-  { id:'atk',   icon:'⚔️',  name:'Power',       desc:'+1 Attack damage',      apply: h => { h.atkPow += 1; }},
-  { id:'jmp',   icon:'🦘',  name:'Spring Legs', desc:'+1 Jump power',         apply: h => { h.jumpPow += 1; }},
-  { id:'spd',   icon:'💨',  name:'Speed',       desc:'+0.5 Move speed',       apply: h => { h.speed += 0.5; }},
-  { id:'xp',    icon:'⭐',  name:'Wisdom',      desc:'+30% XP gain',          apply: h => { h._xpMult = (h._xpMult||1) * 1.3; }},
-  { id:'heal',  icon:'💊',  name:'Medkit',      desc:'+5 HP now',             apply: h => { h.hp = Math.min(h.hp+5, h.maxHp); }},
-  { id:'crit',  icon:'🎯',  name:'Critical',    desc:'20% chance 3x damage',  apply: h => { h._crit = (h._crit||0) + 0.2; }},
-  { id:'coin',  icon:'🪙',  name:'Greedy',      desc:'+10 coins now',         apply: (_,s) => { s.coinCount += 10; }},
+  { icon:'❤️',  name:'Vitality',    desc:'+3 Max HP, full heal',  apply: h => { h.maxHp += 3; h.hp = h.maxHp; }},
+  { icon:'⚔️',  name:'Power',       desc:'+1 Attack damage',      apply: h => { h.atkPow += 1; }},
+  { icon:'🛡️',  name:'Fortify',     desc:'+1 Defense',            apply: h => { h.defense += 1; }},
+  { icon:'🦘',  name:'Spring Legs', desc:'+1 Jump power',         apply: h => { h.jumpPow += 1; }},
+  { icon:'💨',  name:'Speed',       desc:'+0.5 Move speed',       apply: h => { h.speed += 0.5; }},
+  { icon:'⭐',  name:'Wisdom',      desc:'+30% XP gain',          apply: h => { h._xpMult = (h._xpMult||1) * 1.3; }},
+  { icon:'💊',  name:'Medkit',      desc:'+5 HP now',             apply: h => { h.hp = Math.min(h.hp+5, h.maxHp); }},
+  { icon:'🎯',  name:'Critical',    desc:'20% chance 3x damage',  apply: h => { h._crit = (h._crit||0) + 0.2; }},
+  { icon:'🪙',  name:'Greedy',      desc:'+15 coins now',         apply: (_,s) => { s.coinCount += 15; }},
 ];
 
 function pickUpgrades() {
   const pool = [...UPGRADE_POOL];
   const picks = [];
   for (let i = 0; i < 3; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
-    picks.push(pool.splice(idx, 1)[0]);
+    picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   }
   return picks;
 }
 
-// ---- Procedural World Generation ----
+// ---- State ----
+let state;
+function createState() {
+  return {
+    camera: 0, distance: 0, coinCount: 0,
+    paused: false, dead: false, shopOpen: false,
+    hero: {
+      x: 120, y: GROUND, w: 28, h: 36,
+      vx: 0, vy: 0, onGround: false, facing: 1,
+      attackTimer: 0, attackCooldown: 0, invTimer: 0,
+      animFrame: 0, animTimer: 0,
+      hp: 5, maxHp: 5,
+      lvl: 1, xp: 0, xpNext: 20,
+      atkPow: 1, defense: 0, jumpPow: 1, speed: 1,
+    },
+    platforms: [], coins: [], enemies: [], particles: [],
+    worldX: 0, keys: {}, frameCount: 0,
+  };
+}
+
+// ---- World Generation ----
 function generateChunk(s, fromX) {
   const density = Math.min(0.08, 0.02 + s.distance / 5000);
   const lvl = s.hero.lvl;
   const diffMult = 1 + s.distance / 2000;
 
-  // Platforms (elevated)
   const numPlat = 3 + Math.floor(Math.random() * 3);
   for (let i = 0; i < numPlat; i++) {
     const x = fromX + Math.random() * 800;
     const y = GROUND - 80 - Math.random() * 160;
     const w = 80 + Math.random() * 120;
     s.platforms.push({ x, y, w, h: 16, type: 'platform' });
-
-    // Coin on platform (common)
-    if (Math.random() < 0.7) {
+    if (Math.random() < 0.7)
       s.coins.push({ x: x + w/2 - 8, y: y - 24, w: 16, h: 16, val: 1, collected: false });
-    }
-    // Coin cluster
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.4)
       for (let j = 0; j < 3; j++)
         s.coins.push({ x: x + j*24, y: y - 24, w: 16, h: 16, val: 1, collected: false });
-    }
   }
-
-  // Ground coins
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 5; i++)
     if (Math.random() < 0.5)
       s.coins.push({ x: fromX + Math.random()*800, y: GROUND - 24, w: 16, h: 16, val: 1, collected: false });
-  }
 
-  // Gaps (pits) — require jump power
   if (s.distance > 400 && Math.random() < 0.3 + lvl * 0.02) {
     const gx = fromX + 200 + Math.random() * 400;
-    // Mark pit (visual only, platforms block the path)
     s.platforms.push({ x: gx, y: GROUND + 10, w: 60 + lvl * 10, h: 12, type: 'pit', deadly: true });
   }
 
-  // Enemies
   const numEnemies = Math.floor(1 + density * 400 * diffMult);
   for (let i = 0; i < numEnemies; i++) {
     const ex = fromX + 200 + Math.random() * 700;
     const etype = pickEnemyType(lvl, s.distance);
-    s.enemies.push(spawnEnemy(ex, etype, lvl, diffMult));
+    s.enemies.push(spawnEnemy(ex, etype, lvl, diffMult, s.distance));
   }
 }
 
@@ -170,21 +240,24 @@ function pickEnemyType(lvl, dist) {
   if (dist < 1500) return Math.random() < 0.4 ? 'jumper' : Math.random() < 0.3 ? 'shooter' : 'walker';
   const r = Math.random();
   if (r < 0.25) return 'jumper';
-  if (r < 0.5) return 'shooter';
+  if (r < 0.5)  return 'shooter';
   if (r < 0.65) return 'heavy';
   return 'walker';
 }
 
-function spawnEnemy(x, type, lvl, diff) {
-  const base = { x, y: GROUND, w: 30, h: 34, vx: 0, vy: 0, onGround: false, facing: -1,
-    type, dead: false, hitTimer: 0, animFrame: 0, animTimer: 0,
-    patrolDir: Math.random() < 0.5 ? 1 : -1, patrolTimer: 0 };
-
+function spawnEnemy(x, type, lvl, diff, dist) {
+  const tier = dist < 1000 ? 0 : dist < 3000 ? 1 : dist < 6000 ? 2 : 3;
+  const color = (TIER_COLORS[type] || TIER_COLORS.walker)[tier];
+  const base = {
+    x, y: GROUND, w: 30, h: 34, vx: 0, vy: 0, onGround: false, facing: -1,
+    type, tier, dead: false, hitTimer: 0, animFrame: 0, animTimer: 0,
+    patrolDir: Math.random() < 0.5 ? 1 : -1, patrolTimer: 0,
+  };
   switch(type) {
-    case 'walker':  return {...base, hp: 2+lvl, maxHp: 2+lvl, atk: 1+Math.floor(lvl*0.5)*diff|0, speed: 1+lvl*0.15, xpVal: 4+lvl*2, color:'#e06030'};
-    case 'jumper':  return {...base, hp: 3+lvl, maxHp: 3+lvl, atk: 1+Math.floor(lvl*0.7)*diff|0, speed: 1.5+lvl*0.2, xpVal: 6+lvl*2, color:'#30b0e0', w:24, h:28, jumpCd:0};
-    case 'shooter': return {...base, hp: 2+lvl, maxHp: 2+lvl, atk: 0, speed: 0.4, xpVal: 8+lvl*3, color:'#c040e0', shootCd:0, projAtk: 1+Math.floor(lvl*0.6)*diff|0};
-    case 'heavy':   return {...base, hp: 8+lvl*2, maxHp: 8+lvl*2, atk: 2+lvl*diff|0, speed: 0.6+lvl*0.1, xpVal: 12+lvl*4, color:'#e04040', w:38, h:42};
+    case 'walker':  return {...base, hp: 2+lvl,     maxHp: 2+lvl,     atk: Math.max(1,Math.floor((1+lvl*0.5)*diff)), speed: 1+lvl*0.15,  xpVal: 4+lvl*2,  color};
+    case 'jumper':  return {...base, hp: 3+lvl,     maxHp: 3+lvl,     atk: Math.max(1,Math.floor((1+lvl*0.7)*diff)), speed: 1.5+lvl*0.2, xpVal: 6+lvl*2,  color, w:24, h:28, jumpCd:0};
+    case 'shooter': return {...base, hp: 2+lvl,     maxHp: 2+lvl,     atk: 0, speed: 0.4,                            xpVal: 8+lvl*3,  color, shootCd:0, projAtk: Math.max(1,Math.floor((1+lvl*0.6)*diff))};
+    case 'heavy':   return {...base, hp: 8+lvl*2,   maxHp: 8+lvl*2,   atk: Math.max(1,Math.floor((2+lvl)*diff)),     speed: 0.6+lvl*0.1, xpVal: 12+lvl*4, color, w:40, h:44};
     default: return base;
   }
 }
@@ -195,154 +268,94 @@ let projectiles = [];
 function update(s) {
   if (s.paused || s.dead) return;
   s.frameCount++;
-
   const h = s.hero;
   const spd = 3 * h.speed;
 
-  // Input
   const left  = s.keys['ArrowLeft']  || s.keys['a'] || s.keys['A'];
   const right = s.keys['ArrowRight'] || s.keys['d'] || s.keys['D'];
   const jump  = s.keys['ArrowUp']    || s.keys['w'] || s.keys['W'] || s.keys[' '];
   const atk   = s.keys['z'] || s.keys['Z'] || s.keys['x'] || s.keys['X'] || s.keys['Enter'];
 
-  if (left)  { h.vx = -spd; h.facing = -1; }
-  else if (right) { h.vx = spd; h.facing = 1; }
+  if (left)       { h.vx = -spd; h.facing = -1; }
+  else if (right) { h.vx =  spd; h.facing =  1; }
   else h.vx *= 0.7;
 
-  // Always move right a bit (auto-scroll feel)
-  if (!left && !right) h.vx = Math.max(h.vx, 0);
-  if (right || (!left && s.frameCount % 2 === 0)) {
-    // subtle drift
-  }
+  if (jump && h.onGround) { h.vy = -(8 + h.jumpPow * 2.5); h.onGround = false; }
 
-  // Jump
-  if (jump && h.onGround) {
-    h.vy = -(8 + h.jumpPow * 2.5);
-    h.onGround = false;
-  }
-
-  // Attack
   if (atk && h.attackCooldown <= 0) {
     h.attackTimer = 18;
     h.attackCooldown = 30 - Math.min(20, h.atkPow * 2);
     doHeroAttack(s);
   }
 
-  // Physics
-  h.vy += 0.5; // gravity
+  h.vy += 0.5;
   h.x += h.vx;
   h.y += h.vy;
 
-  // Floor
   h.onGround = false;
-  if (h.y + h.h >= GROUND) {
-    h.y = GROUND - h.h;
-    h.vy = 0;
-    h.onGround = true;
-  }
+  if (h.y + h.h >= GROUND) { h.y = GROUND - h.h; h.vy = 0; h.onGround = true; }
 
-  // Platform collisions
   for (const p of s.platforms) {
     if (p.type === 'pit') {
-      // Pit: if hero falls in (below GROUND level, inside pit x range)
-      if (h.x + h.w > p.x && h.x < p.x + p.w && h.y + h.h > GROUND + 4) {
-        heroHit(s, 999);
-      }
+      if (h.x + h.w > p.x && h.x < p.x + p.w && h.y + h.h > GROUND + 4) heroHit(s, 999);
       continue;
     }
-    if (rectOverlap(h, p)) {
-      // Only land on top
-      if (h.vy >= 0 && h.y + h.h - h.vy <= p.y + 2) {
-        h.y = p.y - h.h;
-        h.vy = 0;
-        h.onGround = true;
-      }
+    if (rectOverlap(h, p) && h.vy >= 0 && h.y + h.h - h.vy <= p.y + 2) {
+      h.y = p.y - h.h; h.vy = 0; h.onGround = true;
     }
   }
 
-  // Keep hero from going left of camera
   if (h.x < s.camera + 60) h.x = s.camera + 60;
-
-  // Camera follows hero
-  const targetCam = h.x - W * 0.3;
-  s.camera += (targetCam - s.camera) * 0.08;
-
-  // Distance
+  s.camera += (h.x - W * 0.3 - s.camera) * 0.08;
   s.distance = Math.max(s.distance, Math.floor(h.x / 10));
 
-  // Generate more world
-  if (s.worldX < s.camera + W + 400) {
-    generateChunk(s, s.worldX);
-    s.worldX += 800;
-  }
+  if (s.worldX < s.camera + W + 400) { generateChunk(s, s.worldX); s.worldX += 800; }
 
-  // Cleanup offscreen
   const cullX = s.camera - 200;
   s.platforms = s.platforms.filter(p => p.x + p.w > cullX);
   s.coins     = s.coins.filter(c => c.x > cullX);
   s.enemies   = s.enemies.filter(e => e.x + e.w > cullX && !e.dead);
   projectiles = projectiles.filter(p => p.x > cullX && p.x < s.camera + W + 100);
 
-  // Timers
   if (h.attackTimer > 0) h.attackTimer--;
   if (h.attackCooldown > 0) h.attackCooldown--;
   if (h.invTimer > 0) h.invTimer--;
 
-  // Coin collection
   for (const c of s.coins) {
     if (!c.collected && rectOverlap(h, c)) {
-      c.collected = true;
-      s.coinCount = (s.coinCount||0) + c.val;
+      c.collected = true; s.coinCount++;
       spawnParticles(s, c.x+8, c.y+8, '#ffd700', 6);
     }
   }
   s.coins = s.coins.filter(c => !c.collected);
 
-  // Enemy update
-  for (const e of s.enemies) {
-    updateEnemy(s, e);
-  }
+  for (const e of s.enemies) updateEnemy(s, e);
 
-  // Projectile update
   for (const p of projectiles) {
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.1;
-    p.life--;
-    // Hero hit by projectile
-    if (p.fromEnemy && !p.hit && rectOverlap(h, p) && h.invTimer <= 0) {
-      p.hit = true;
-      heroHit(s, p.atk);
-    }
-    // Enemy hit by hero projectile
+    p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--;
+    if (p.fromEnemy && !p.hit && rectOverlap(h, p) && h.invTimer <= 0) { p.hit = true; heroHit(s, p.atk); }
     if (!p.fromEnemy && !p.hit) {
       for (const e of s.enemies) {
-        if (!e.dead && rectOverlap(e, p)) {
-          p.hit = true;
-          damageEnemy(s, e, calcDmg(h));
-          break;
-        }
+        if (!e.dead && rectOverlap(e, p)) { p.hit = true; damageEnemy(s, e, calcDmg(h)); break; }
       }
     }
   }
   projectiles = projectiles.filter(p => p.life > 0 && !p.hit);
 
-  // Particle update
-  for (const p of s.particles) {
-    p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
-  }
+  for (const p of s.particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; }
   s.particles = s.particles.filter(p => p.life > 0);
 
-  // UI
+  const bm = getBiome(s.distance);
   document.getElementById('ui-lvl').textContent = h.lvl;
   document.getElementById('ui-xp').textContent = Math.floor(h.xp);
   document.getElementById('ui-xnxt').textContent = h.xpNext;
-  document.getElementById('ui-coins').textContent = s.coinCount||0;
+  document.getElementById('ui-coins').textContent = s.coinCount;
   document.getElementById('ui-dist').textContent = s.distance;
   document.getElementById('ui-hp').textContent = h.hp;
   document.getElementById('ui-mhp').textContent = h.maxHp;
   document.getElementById('ui-atk').textContent = h.atkPow;
-  document.getElementById('ui-jmp').textContent = h.jumpPow;
+  document.getElementById('ui-def').textContent = h.defense;
+  document.getElementById('ui-biome').textContent = bm.name;
 }
 
 function calcDmg(h) {
@@ -355,11 +368,8 @@ function doHeroAttack(s) {
   const h = s.hero;
   const ax = h.facing === 1 ? h.x + h.w : h.x - 50;
   const hitbox = { x: ax, y: h.y, w: 50, h: h.h };
-  for (const e of s.enemies) {
-    if (!e.dead && rectOverlap(e, hitbox)) {
-      damageEnemy(s, e, calcDmg(h));
-    }
-  }
+  for (const e of s.enemies)
+    if (!e.dead && rectOverlap(e, hitbox)) damageEnemy(s, e, calcDmg(h));
 }
 
 function damageEnemy(s, e, dmg) {
@@ -370,26 +380,20 @@ function damageEnemy(s, e, dmg) {
     e.dead = true;
     gainXP(s, e.xpVal);
     spawnParticles(s, e.x + e.w/2, e.y + e.h/2, '#ffaa00', 12);
-    // Drop coins
     const drops = Math.floor(e.xpVal / 4);
-    for (let i = 0; i < drops; i++) {
+    for (let i = 0; i < drops; i++)
       s.coins.push({ x: e.x + Math.random()*e.w, y: e.y, w: 14, h: 14, val: 1, collected: false });
-    }
   }
 }
 
 function heroHit(s, dmg) {
   const h = s.hero;
   if (h.invTimer > 0) return;
-  h.hp -= dmg;
+  h.hp -= Math.max(1, dmg - h.defense);
   h.invTimer = 60;
   spawnParticles(s, h.x + h.w/2, h.y + h.h/2, '#ff0000', 8);
-  h.vy = -4; // knockback
-  if (h.hp <= 0) {
-    h.hp = 0;
-    s.dead = true;
-    showGameOver(s);
-  }
+  h.vy = -4;
+  if (h.hp <= 0) { h.hp = 0; s.dead = true; showGameOver(s); }
 }
 
 function gainXP(s, amt) {
@@ -411,10 +415,9 @@ function updateEnemy(s, e) {
   const dir = dist > 0 ? 1 : -1;
 
   e.animTimer++;
-  if (e.animTimer > 12) { e.animFrame = (e.animFrame+1)%2; e.animTimer=0; }
+  if (e.animTimer > 12) { e.animFrame = (e.animFrame+1)%2; e.animTimer = 0; }
   if (e.hitTimer > 0) e.hitTimer--;
 
-  // Physics
   e.vy += 0.5;
   e.y += e.vy;
   if (e.y + e.h >= GROUND) { e.y = GROUND - e.h; e.vy = 0; e.onGround = true; }
@@ -428,73 +431,40 @@ function updateEnemy(s, e) {
   }
 
   const aggro = absDist < 320;
-
   switch(e.type) {
-    case 'walker':
-    case 'heavy':
-      if (aggro) {
-        e.vx = dir * e.speed;
-        e.facing = dir;
-      } else {
-        // Patrol
+    case 'walker': case 'heavy':
+      if (aggro) { e.vx = dir * e.speed; e.facing = dir; }
+      else {
         e.patrolTimer--;
         if (e.patrolTimer <= 0) { e.patrolDir *= -1; e.patrolTimer = 60 + Math.random()*60; }
-        e.vx = e.patrolDir * e.speed * 0.5;
-        e.facing = e.patrolDir;
+        e.vx = e.patrolDir * e.speed * 0.5; e.facing = e.patrolDir;
       }
       e.x += e.vx;
-      // Contact damage
-      if (absDist < 36 && Math.abs(h.y - e.y) < e.h && s.hero.invTimer <= 0) {
-        heroHit(s, e.atk);
-      }
+      if (absDist < 38 && Math.abs(h.y - e.y) < e.h && h.invTimer <= 0) heroHit(s, e.atk);
       break;
-
     case 'jumper':
       if (aggro) {
-        e.facing = dir;
-        e.vx = dir * e.speed;
-        e.x += e.vx;
+        e.facing = dir; e.vx = dir * e.speed; e.x += e.vx;
         if (e.jumpCd > 0) e.jumpCd--;
-        if (e.onGround && absDist < 200 && e.jumpCd <= 0) {
-          e.vy = -9;
-          e.jumpCd = 40;
-        }
-        if (absDist < 36 && Math.abs(h.y - e.y) < e.h && s.hero.invTimer <= 0) {
-          heroHit(s, e.atk);
-        }
+        if (e.onGround && absDist < 200 && e.jumpCd <= 0) { e.vy = -9; e.jumpCd = 40; }
+        if (absDist < 36 && Math.abs(h.y - e.y) < e.h && h.invTimer <= 0) heroHit(s, e.atk);
       }
       break;
-
     case 'shooter':
       e.facing = dir;
       if (aggro && e.shootCd <= 0 && absDist > 80) {
-        // Shoot
         e.shootCd = 90;
-        const speed = 4;
-        projectiles.push({
-          x: e.x + e.w/2, y: e.y + e.h/2 - 6,
-          vx: dir * speed, vy: -0.5,
-          w: 10, h: 10, life: 80, fromEnemy: true, hit: false,
-          atk: e.projAtk, color: '#c040e0'
-        });
+        projectiles.push({ x: e.x+e.w/2, y: e.y+e.h/2-6, vx: dir*4, vy: -0.5, w:10, h:10, life:80, fromEnemy:true, hit:false, atk:e.projAtk, color:e.color });
       }
       if (e.shootCd > 0) e.shootCd--;
-      // Slowly retreat if hero close
       if (absDist < 120) e.x -= dir * e.speed;
       break;
   }
 }
 
 function spawnParticles(s, x, y, color, count) {
-  for (let i = 0; i < count; i++) {
-    s.particles.push({
-      x, y,
-      vx: (Math.random()-0.5)*4,
-      vy: (Math.random()-0.5)*4 - 2,
-      life: 20 + Math.random()*20,
-      color, size: 3 + Math.random()*4
-    });
-  }
+  for (let i = 0; i < count; i++)
+    s.particles.push({ x, y, vx:(Math.random()-0.5)*4, vy:(Math.random()-0.5)*4-2, life:20+Math.random()*20, color, size:3+Math.random()*4 });
 }
 
 // ---- Drawing ----
@@ -502,69 +472,70 @@ function draw(s) {
   ctx.clearRect(0, 0, W, H);
   ctx.save();
   ctx.translate(-s.camera, 0);
-
-  drawBackground(s);
-  drawPlatforms(s);
+  const bm = getBiome(s.distance);
+  drawBackground(s, bm);
+  drawPlatforms(s, bm);
   drawCoins(s);
   drawEnemies(s);
   drawHero(s);
-  drawProjectiles(s);
+  drawProjectiles();
   drawParticles(s);
-
   ctx.restore();
-
-  // HUD HP bar
   drawHUD(s);
 }
 
-function drawBackground(s) {
-  // Sky gradient
+function drawBackground(s, bm) {
   const grd = ctx.createLinearGradient(s.camera, 0, s.camera, H);
-  const t = Math.min(1, s.distance / 3000);
-  const r = Math.floor(20 + t*60), g = Math.floor(20 + t*10), b = Math.floor(40 + t*40);
-  grd.addColorStop(0, `rgb(${r},${g},${b})`);
-  grd.addColorStop(1, '#111118');
+  grd.addColorStop(0, rgb(bm.sky0));
+  grd.addColorStop(1, rgb(bm.sky1));
   ctx.fillStyle = grd;
   ctx.fillRect(s.camera, 0, W, H);
 
-  // Parallax hills/clouds
-  const cx = s.camera;
-  ctx.fillStyle = `rgba(40,40,80,0.4)`;
+  // Stars for Space / Shadow Realm
+  if (bm.isSpace) {
+    for (let i = 0; i < 80; i++) {
+      const wx = s.camera + (i * 137 % (W + 200)) - 100;
+      const wy = (i * 71) % (H - 80);
+      ctx.globalAlpha = 0.4 + 0.4 * Math.sin(s.frameCount * 0.04 + i * 0.9);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(wx, wy, 1 + (i % 3 === 0 ? 1 : 0), 1 + (i % 3 === 0 ? 1 : 0));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Parallax bg shapes (hills / clouds / blobs)
+  ctx.fillStyle = rgba(bm.bg, bm.bgA);
   for (let i = 0; i < 6; i++) {
-    const hx = ((cx * 0.3 + i * 280) % (W + 200)) + cx - 100;
+    const hx = ((s.camera * 0.3 + i * 280) % (W + 200)) + s.camera - 100;
     ctx.beginPath();
     ctx.arc(hx, GROUND - 20, 80 + i*20, Math.PI, 0);
     ctx.fill();
   }
 
   // Ground
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = rgb(bm.gnd);
   ctx.fillRect(s.camera - 10, GROUND, W + 20, H - GROUND + 10);
-  ctx.fillStyle = '#2a2a4e';
+  ctx.fillStyle = rgb(bm.gndA);
   ctx.fillRect(s.camera - 10, GROUND, W + 20, 8);
 }
 
-function drawPlatforms(s) {
+function drawPlatforms(s, bm) {
   for (const p of s.platforms) {
     if (p.x + p.w < s.camera - 10 || p.x > s.camera + W + 10) continue;
     if (p.type === 'pit') {
-      // Draw pit / gap
-      ctx.fillStyle = '#050508';
+      ctx.fillStyle = rgb(bm.sky1);
       ctx.fillRect(p.x, GROUND, p.w, H - GROUND + 10);
       ctx.fillStyle = '#ff2200';
       ctx.fillRect(p.x, GROUND + p.h, p.w, 4);
       continue;
     }
-    // Platform
-    ctx.fillStyle = '#3a3a6e';
+    ctx.fillStyle = rgb(bm.plt);
     ctx.fillRect(p.x, p.y, p.w, p.h);
-    ctx.fillStyle = '#5a5a9e';
+    ctx.fillStyle = rgb(bm.pltA);
     ctx.fillRect(p.x, p.y, p.w, 4);
-    // Grass bits
-    ctx.fillStyle = '#4a8a4a';
-    for (let gx = p.x + 4; gx < p.x + p.w - 4; gx += 12) {
+    ctx.fillStyle = rgb(bm.gndA);
+    for (let gx = p.x + 4; gx < p.x + p.w - 4; gx += 12)
       ctx.fillRect(gx, p.y - 3, 6, 4);
-    }
   }
 }
 
@@ -576,109 +547,122 @@ function drawCoins(s) {
     ctx.beginPath();
     ctx.arc(c.x + c.w/2, c.y + c.h/2, c.w/2 * pulse, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = '#fff8';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    ctx.strokeStyle = '#fff8'; ctx.lineWidth = 1; ctx.stroke();
   });
 }
 
 function drawHero(s) {
   const h = s.hero;
-  const blink = h.invTimer > 0 && Math.floor(h.invTimer / 4) % 2 === 0;
-  if (blink) return;
-
+  if (h.invTimer > 0 && Math.floor(h.invTimer/4) % 2 === 0) return;
   ctx.save();
   ctx.translate(h.x + h.w/2, h.y + h.h/2);
   if (h.facing === -1) ctx.scale(-1, 1);
 
-  // Body
-  ctx.fillStyle = '#4080ff';
-  ctx.fillRect(-h.w/2, -h.h/2, h.w, h.h);
-
-  // Head
-  ctx.fillStyle = '#f0c080';
-  ctx.fillRect(-h.w/2 + 4, -h.h/2 - 12, h.w - 8, 14);
-
-  // Eyes
-  ctx.fillStyle = '#222';
-  ctx.fillRect(2, -h.h/2 - 8, 4, 4);
-
-  // Legs (animated walk)
-  const legSwing = h.onGround ? Math.sin(s.frameCount * 0.3) * 6 : 0;
-  ctx.fillStyle = '#2050cc';
-  ctx.fillRect(-h.w/2 + 2, h.h/2 - 8, 10, 8 + legSwing);
-  ctx.fillRect(h.w/2 - 12, h.h/2 - 8, 10, 8 - legSwing);
-
-  // Attack flash
-  if (h.attackTimer > 10) {
-    ctx.fillStyle = 'rgba(255,200,50,0.7)';
-    ctx.fillRect(h.w/2 - 2, -h.h/4, 20, h.h/2);
+  // Defense glow
+  if (h.defense > 0) {
+    ctx.strokeStyle = `rgba(0,200,255,${Math.min(0.8, 0.2 + h.defense * 0.1)})`;
+    ctx.lineWidth = 2 + h.defense * 0.5;
+    ctx.strokeRect(-h.w/2 - 3, -h.h/2 - 3, h.w + 6, h.h + 6);
   }
 
+  ctx.fillStyle = '#4080ff';
+  ctx.fillRect(-h.w/2, -h.h/2, h.w, h.h);
+  ctx.fillStyle = '#f0c080';
+  ctx.fillRect(-h.w/2+4, -h.h/2-12, h.w-8, 14);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(2, -h.h/2-8, 4, 4);
+
+  const legSwing = h.onGround ? Math.sin(s.frameCount * 0.3) * 6 : 0;
+  ctx.fillStyle = '#2050cc';
+  ctx.fillRect(-h.w/2+2, h.h/2-8, 10, 8+legSwing);
+  ctx.fillRect(h.w/2-12, h.h/2-8, 10, 8-legSwing);
+
+  if (h.attackTimer > 10) {
+    ctx.fillStyle = 'rgba(255,200,50,0.7)';
+    ctx.fillRect(h.w/2-2, -h.h/4, 20, h.h/2);
+  }
   ctx.restore();
 
-  // HP bar above hero
-  const barW = 32, barH = 4;
-  const bx = h.x + h.w/2 - barW/2;
-  const by = h.y - 14;
-  ctx.fillStyle = '#333';
-  ctx.fillRect(bx, by, barW, barH);
+  const barW=32, barH=4, bx=h.x+h.w/2-barW/2, by=h.y-14;
+  ctx.fillStyle='#333'; ctx.fillRect(bx, by, barW, barH);
   ctx.fillStyle = h.hp > h.maxHp*0.4 ? '#44ee44' : '#ee4444';
-  ctx.fillRect(bx, by, barW * (h.hp/h.maxHp), barH);
+  ctx.fillRect(bx, by, barW*(h.hp/h.maxHp), barH);
 }
 
 function drawEnemies(s) {
   for (const e of s.enemies) {
-    if (e.dead) continue;
-    if (e.x + e.w < s.camera - 10 || e.x > s.camera + W + 10) continue;
+    if (e.dead || e.x+e.w < s.camera-10 || e.x > s.camera+W+10) continue;
+    const tier = e.tier || 0;
+    const flash = e.hitTimer > 0;
+    const t = s.frameCount;
 
     ctx.save();
     ctx.translate(e.x + e.w/2, e.y + e.h/2);
     if (e.facing === -1) ctx.scale(-1, 1);
 
-    const flash = e.hitTimer > 0;
+    // Tier 3 aura
+    if (tier >= 3 && !flash) {
+      ctx.globalAlpha = 0.2 + 0.1*Math.sin(t*0.08);
+      ctx.fillStyle = e.color;
+      ctx.fillRect(-e.w/2-8, -e.h/2-8, e.w+16, e.h+16);
+      ctx.globalAlpha = 1;
+    }
+
+    // Body
     ctx.fillStyle = flash ? '#ffffff' : e.color;
     ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
 
+    // Tier 1+: horns
+    if (tier >= 1 && !flash) {
+      ctx.fillStyle = '#ffaa00';
+      ctx.beginPath(); ctx.moveTo(-e.w/4-4,-e.h/2); ctx.lineTo(-e.w/4-8,-e.h/2-13); ctx.lineTo(-e.w/4+2,-e.h/2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(e.w/4-2,-e.h/2);  ctx.lineTo(e.w/4+2,-e.h/2-13);  ctx.lineTo(e.w/4+6,-e.h/2);  ctx.fill();
+    }
+
+    // Tier 2+: side spikes
+    if (tier >= 2 && !flash) {
+      ctx.fillStyle = '#ff5500';
+      ctx.beginPath(); ctx.moveTo(-e.w/2,-5); ctx.lineTo(-e.w/2-16,0); ctx.lineTo(-e.w/2,5); ctx.fill();
+      ctx.beginPath(); ctx.moveTo( e.w/2,-5); ctx.lineTo( e.w/2+16,0); ctx.lineTo( e.w/2,5); ctx.fill();
+    }
+
+    // Tier 3+: crown
+    if (tier >= 3 && !flash) {
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2+2,-e.h/2); ctx.lineTo(-e.w/4,-e.h/2-12);
+      ctx.lineTo(0,-e.h/2-6);       ctx.lineTo(e.w/4,-e.h/2-12);
+      ctx.lineTo(e.w/2-2,-e.h/2);  ctx.closePath(); ctx.fill();
+    }
+
     // Eyes
     ctx.fillStyle = '#fff';
-    ctx.fillRect(e.w/4 - 3, -e.h/2 + 4, 6, 6);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(e.w/4, -e.h/2 + 5, 3, 4);
+    ctx.fillRect(e.w/4-3, -e.h/2+4, 6, 6);
+    ctx.fillStyle = tier >= 2 ? '#ff0000' : '#000';
+    ctx.fillRect(e.w/4, -e.h/2+5, 3, 4);
 
-    // Shooter triangle
+    // Shooter nozzle
     if (e.type === 'shooter') {
-      ctx.fillStyle = '#fff5';
-      ctx.beginPath();
-      ctx.moveTo(e.w/2, 0);
-      ctx.lineTo(e.w/2 + 8, -4);
-      ctx.lineTo(e.w/2 + 8, 4);
-      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath(); ctx.moveTo(e.w/2,0); ctx.lineTo(e.w/2+10,-4); ctx.lineTo(e.w/2+10,4); ctx.fill();
     }
 
     ctx.restore();
 
     // HP bar
-    const barW = e.w + 4;
-    const bx = e.x - 2;
-    const by = e.y - 8;
-    ctx.fillStyle = '#333';
-    ctx.fillRect(bx, by, barW, 4);
-    ctx.fillStyle = '#ee4444';
-    ctx.fillRect(bx, by, barW * (e.hp/e.maxHp), 4);
+    ctx.fillStyle='#333'; ctx.fillRect(e.x-2, e.y-8, e.w+4, 4);
+    const hpCol = ['#ee4444','#ee6622','#dd2200','#ff0000'][tier] || '#ee4444';
+    ctx.fillStyle = hpCol;
+    ctx.fillRect(e.x-2, e.y-8, (e.w+4)*(e.hp/e.maxHp), 4);
   }
 }
 
-function drawProjectiles(s) {
+function drawProjectiles() {
   for (const p of projectiles) {
     ctx.fillStyle = p.color || '#ffee44';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#fff8';
-    ctx.beginPath();
-    ctx.arc(p.x - p.vx, p.y - p.vy, 3, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x-p.vx, p.y-p.vy, 3, 0, Math.PI*2); ctx.fill();
   }
 }
 
@@ -692,90 +676,107 @@ function drawParticles(s) {
 }
 
 function drawHUD(s) {
-  // XP bar at bottom
   const h = s.hero;
-  const xpW = W * (h.xp / h.xpNext);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(0, H - 6, W, 6);
-  ctx.fillStyle = '#8844ff';
-  ctx.fillRect(0, H - 6, xpW, 6);
+  ctx.fillStyle='#222'; ctx.fillRect(0, H-6, W, 6);
+  ctx.fillStyle='#8844ff'; ctx.fillRect(0, H-6, W*(h.xp/h.xpNext), 6);
 
-  // Controls hint (fades out)
-  if (s.frameCount < 200) {
-    ctx.globalAlpha = Math.max(0, 1 - s.frameCount/180);
-    ctx.fillStyle = '#fff';
-    ctx.font = '13px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Arrow Keys / WASD: Move & Jump   Z/X/Enter: Attack', W/2, H - 18);
-    ctx.textAlign = 'left';
-    ctx.globalAlpha = 1;
+  if (s.frameCount < 260) {
+    ctx.globalAlpha = Math.max(0, 1 - s.frameCount/220);
+    ctx.fillStyle='#fff'; ctx.font='13px monospace'; ctx.textAlign='center';
+    ctx.fillText('WASD/Arrows: Move & Jump   Z/X: Attack   B: Shop', W/2, H-18);
+    ctx.textAlign='left'; ctx.globalAlpha=1;
   }
 }
 
-// ---- Level Up UI ----
+// ---- Level Up ----
 function showLevelUp(s) {
   s.paused = true;
   const screen = document.getElementById('upgrade-screen');
   const cards = document.getElementById('upgrade-cards');
   cards.innerHTML = '';
-  const upgrades = pickUpgrades();
-
-  upgrades.forEach(u => {
+  pickUpgrades().forEach(u => {
     const div = document.createElement('div');
     div.className = 'upgrade-card';
     div.innerHTML = `<div class="icon">${u.icon}</div><div class="name">${u.name}</div><div class="desc">${u.desc}</div>`;
-    div.onclick = () => {
-      u.apply(s.hero, s);
-      screen.classList.remove('show');
-      s.paused = false;
-    };
+    div.onclick = () => { u.apply(s.hero, s); screen.classList.remove('show'); s.paused = false; };
     cards.appendChild(div);
   });
-
   screen.classList.add('show');
 }
 
+// ---- Shop ----
+function openShop() {
+  if (!state || state.dead || state.paused) return;
+  state.paused = true;
+  state.shopOpen = true;
+  renderShop();
+  document.getElementById('shop-screen').classList.add('show');
+}
+
+function closeShop() {
+  if (!state) return;
+  state.shopOpen = false;
+  state.paused = false;
+  document.getElementById('shop-screen').classList.remove('show');
+}
+
+function renderShop() {
+  document.getElementById('shop-coin-count').textContent = state.coinCount;
+  const container = document.getElementById('shop-items');
+  container.innerHTML = '';
+  SHOP_ITEMS.forEach(item => {
+    const canAfford = state.coinCount >= item.cost;
+    const div = document.createElement('div');
+    div.className = 'shop-item' + (canAfford ? '' : ' cant-afford');
+    div.innerHTML = `
+      <div class="s-icon">${item.icon}</div>
+      <div class="s-name">${item.name}</div>
+      <div class="s-desc">${item.desc}</div>
+      <div class="s-cost">🪙 ${item.cost}</div>`;
+    if (canAfford) {
+      div.onclick = () => { state.coinCount -= item.cost; item.apply(state.hero); renderShop(); };
+    }
+    container.appendChild(div);
+  });
+}
+
+// ---- Game Over ----
 function showGameOver(s) {
   const el = document.getElementById('gameover');
   document.getElementById('go-stats').innerHTML =
-    `Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount||0}`;
+    `Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount}`;
   el.style.display = 'block';
 }
 
 function restartGame() {
   document.getElementById('gameover').style.display = 'none';
   document.getElementById('upgrade-screen').classList.remove('show');
+  document.getElementById('shop-screen').classList.remove('show');
   projectiles = [];
   state = createState();
-  // Pre-generate initial world
   generateChunk(state, 300);
   state.worldX = 1100;
-  state.coinCount = 0;
 }
 
 // ---- Collision ----
 function rectOverlap(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x &&
-         a.y < b.y + b.h && a.y + a.h > b.y;
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
 }
 
 // ---- Input ----
 window.addEventListener('keydown', e => {
   if (state) state.keys[e.key] = true;
   if ([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  if ((e.key === 'b' || e.key === 'B') && state && !state.dead) {
+    state.shopOpen ? closeShop() : openShop();
+  }
+  if (e.key === 'Escape' && state && state.shopOpen) closeShop();
 });
-window.addEventListener('keyup', e => {
-  if (state) state.keys[e.key] = false;
-});
+window.addEventListener('keyup', e => { if (state) state.keys[e.key] = false; });
 
 // ---- Loop ----
-function loop() {
-  update(state);
-  draw(state);
-  requestAnimationFrame(loop);
-}
+function loop() { update(state); draw(state); requestAnimationFrame(loop); }
 
-// ---- Start ----
 restartGame();
 loop();
 </script>
