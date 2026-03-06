@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Forward Platformer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: monospace; overflow: hidden; }
+  canvas { border: 2px solid #333; display: block; }
+  #ui { color: #fff; font-size: 13px; width: 800px; display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
+  #upgrade-screen {
+    display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); color: #fff; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 10;
+  }
+  #upgrade-screen.show { display: flex; }
+  #upgrade-screen h2 { font-size: 28px; margin-bottom: 8px; color: #ffd700; }
+  #upgrade-screen p { margin-bottom: 24px; color: #aaa; }
+  .upgrade-cards { display: flex; gap: 16px; }
+  .upgrade-card {
+    background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
+    padding: 20px; width: 180px; cursor: pointer; text-align: center;
+    transition: border-color 0.2s, transform 0.1s;
+  }
+  .upgrade-card:hover { border-color: #ffd700; transform: scale(1.05); }
+  .upgrade-card .icon { font-size: 36px; margin-bottom: 8px; }
+  .upgrade-card .name { font-size: 16px; font-weight: bold; margin-bottom: 6px; color: #ffd700; }
+  .upgrade-card .desc { font-size: 12px; color: #bbb; }
+  #gameover { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    background: #111; border: 2px solid #e55; padding: 32px 48px; border-radius: 12px;
+    text-align: center; color: #fff; z-index: 20; }
+  #gameover h2 { color: #e55; font-size: 32px; margin-bottom: 12px; }
+  #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <span id="ui-left">LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
+  <span>COINS <span id="ui-coins">0</span> &nbsp; DIST <span id="ui-dist">0</span>m</span>
+  <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp; ATK <span id="ui-atk">1</span> &nbsp; JMP <span id="ui-jmp">1</span></span>
+</div>
+<canvas id="c" width="800" height="440"></canvas>
+
+<div id="upgrade-screen">
+  <h2>LEVEL UP!</h2>
+  <p>Choose an upgrade:</p>
+  <div class="upgrade-cards" id="upgrade-cards"></div>
+</div>
+<div id="gameover">
+  <h2>GAME OVER</h2>
+  <p id="go-stats"></p>
+  <button onclick="restartGame()">Play Again</button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const GROUND = H - 60;
+const TILE = 40;
+
+// ---- State ----
+let state;
+
+function createState() {
+  return {
+    camera: 0,
+    distance: 0,
+    coins: 0,
+    paused: false,
+    dead: false,
+    hero: {
+      x: 120, y: GROUND, w: 28, h: 36,
+      vx: 0, vy: 0,
+      onGround: false,
+      facing: 1,
+      attackTimer: 0,
+      attackCooldown: 0,
+      invTimer: 0,
+      animFrame: 0, animTimer: 0,
+      // Stats
+      hp: 5, maxHp: 5,
+      lvl: 1, xp: 0, xpNext: 20,
+      atkPow: 1,
+      jumpPow: 1,   // multiplier: jump speed
+      speed: 1,
+    },
+    platforms: [],
+    coins: [],
+    enemies: [],
+    particles: [],
+    worldX: 0,  // how far world has been generated
+    keys: {},
+    frameCount: 0,
+  };
+}
+
+// ---- Upgrades ----
+const UPGRADE_POOL = [
+  { id:'hp',    icon:'❤️',  name:'Vitality',    desc:'+3 Max HP, full heal',  apply: h => { h.maxHp += 3; h.hp = h.maxHp; }},
+  { id:'atk',   icon:'⚔️',  name:'Power',       desc:'+1 Attack damage',      apply: h => { h.atkPow += 1; }},
+  { id:'jmp',   icon:'🦘',  name:'Spring Legs', desc:'+1 Jump power',         apply: h => { h.jumpPow += 1; }},
+  { id:'spd',   icon:'💨',  name:'Speed',       desc:'+0.5 Move speed',       apply: h => { h.speed += 0.5; }},
+  { id:'xp',    icon:'⭐',  name:'Wisdom',      desc:'+30% XP gain',          apply: h => { h._xpMult = (h._xpMult||1) * 1.3; }},
+  { id:'heal',  icon:'💊',  name:'Medkit',      desc:'+5 HP now',             apply: h => { h.hp = Math.min(h.hp+5, h.maxHp); }},
+  { id:'crit',  icon:'🎯',  name:'Critical',    desc:'20% chance 3x damage',  apply: h => { h._crit = (h._crit||0) + 0.2; }},
+  { id:'coin',  icon:'🪙',  name:'Greedy',      desc:'+10 coins now',         apply: (_,s) => { s.coinCount += 10; }},
+];
+
+function pickUpgrades() {
+  const pool = [...UPGRADE_POOL];
+  const picks = [];
+  for (let i = 0; i < 3; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picks.push(pool.splice(idx, 1)[0]);
+  }
+  return picks;
+}
+
+// ---- Procedural World Generation ----
+function generateChunk(s, fromX) {
+  const density = Math.min(0.08, 0.02 + s.distance / 5000);
+  const lvl = s.hero.lvl;
+  const diffMult = 1 + s.distance / 2000;
+
+  // Platforms (elevated)
+  const numPlat = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < numPlat; i++) {
+    const x = fromX + Math.random() * 800;
+    const y = GROUND - 80 - Math.random() * 160;
+    const w = 80 + Math.random() * 120;
+    s.platforms.push({ x, y, w, h: 16, type: 'platform' });
+
+    // Coin on platform (common)
+    if (Math.random() < 0.7) {
+      s.coins.push({ x: x + w/2 - 8, y: y - 24, w: 16, h: 16, val: 1, collected: false });
+    }
+    // Coin cluster
+    if (Math.random() < 0.4) {
+      for (let j = 0; j < 3; j++)
+        s.coins.push({ x: x + j*24, y: y - 24, w: 16, h: 16, val: 1, collected: false });
+    }
+  }
+
+  // Ground coins
+  for (let i = 0; i < 5; i++) {
+    if (Math.random() < 0.5)
+      s.coins.push({ x: fromX + Math.random()*800, y: GROUND - 24, w: 16, h: 16, val: 1, collected: false });
+  }
+
+  // Gaps (pits) — require jump power
+  if (s.distance > 400 && Math.random() < 0.3 + lvl * 0.02) {
+    const gx = fromX + 200 + Math.random() * 400;
+    // Mark pit (visual only, platforms block the path)
+    s.platforms.push({ x: gx, y: GROUND + 10, w: 60 + lvl * 10, h: 12, type: 'pit', deadly: true });
+  }
+
+  // Enemies
+  const numEnemies = Math.floor(1 + density * 400 * diffMult);
+  for (let i = 0; i < numEnemies; i++) {
+    const ex = fromX + 200 + Math.random() * 700;
+    const etype = pickEnemyType(lvl, s.distance);
+    s.enemies.push(spawnEnemy(ex, etype, lvl, diffMult));
+  }
+}
+
+function pickEnemyType(lvl, dist) {
+  if (dist < 300) return 'walker';
+  if (dist < 800) return Math.random() < 0.3 ? 'jumper' : 'walker';
+  if (dist < 1500) return Math.random() < 0.4 ? 'jumper' : Math.random() < 0.3 ? 'shooter' : 'walker';
+  const r = Math.random();
+  if (r < 0.25) return 'jumper';
+  if (r < 0.5) return 'shooter';
+  if (r < 0.65) return 'heavy';
+  return 'walker';
+}
+
+function spawnEnemy(x, type, lvl, diff) {
+  const base = { x, y: GROUND, w: 30, h: 34, vx: 0, vy: 0, onGround: false, facing: -1,
+    type, dead: false, hitTimer: 0, animFrame: 0, animTimer: 0,
+    patrolDir: Math.random() < 0.5 ? 1 : -1, patrolTimer: 0 };
+
+  switch(type) {
+    case 'walker':  return {...base, hp: 2+lvl, maxHp: 2+lvl, atk: 1+Math.floor(lvl*0.5)*diff|0, speed: 1+lvl*0.15, xpVal: 4+lvl*2, color:'#e06030'};
+    case 'jumper':  return {...base, hp: 3+lvl, maxHp: 3+lvl, atk: 1+Math.floor(lvl*0.7)*diff|0, speed: 1.5+lvl*0.2, xpVal: 6+lvl*2, color:'#30b0e0', w:24, h:28, jumpCd:0};
+    case 'shooter': return {...base, hp: 2+lvl, maxHp: 2+lvl, atk: 0, speed: 0.4, xpVal: 8+lvl*3, color:'#c040e0', shootCd:0, projAtk: 1+Math.floor(lvl*0.6)*diff|0};
+    case 'heavy':   return {...base, hp: 8+lvl*2, maxHp: 8+lvl*2, atk: 2+lvl*diff|0, speed: 0.6+lvl*0.1, xpVal: 12+lvl*4, color:'#e04040', w:38, h:42};
+    default: return base;
+  }
+}
+
+// ---- Game Logic ----
+let projectiles = [];
+
+function update(s) {
+  if (s.paused || s.dead) return;
+  s.frameCount++;
+
+  const h = s.hero;
+  const spd = 3 * h.speed;
+
+  // Input
+  const left  = s.keys['ArrowLeft']  || s.keys['a'] || s.keys['A'];
+  const right = s.keys['ArrowRight'] || s.keys['d'] || s.keys['D'];
+  const jump  = s.keys['ArrowUp']    || s.keys['w'] || s.keys['W'] || s.keys[' '];
+  const atk   = s.keys['z'] || s.keys['Z'] || s.keys['x'] || s.keys['X'] || s.keys['Enter'];
+
+  if (left)  { h.vx = -spd; h.facing = -1; }
+  else if (right) { h.vx = spd; h.facing = 1; }
+  else h.vx *= 0.7;
+
+  // Always move right a bit (auto-scroll feel)
+  if (!left && !right) h.vx = Math.max(h.vx, 0);
+  if (right || (!left && s.frameCount % 2 === 0)) {
+    // subtle drift
+  }
+
+  // Jump
+  if (jump && h.onGround) {
+    h.vy = -(8 + h.jumpPow * 2.5);
+    h.onGround = false;
+  }
+
+  // Attack
+  if (atk && h.attackCooldown <= 0) {
+    h.attackTimer = 18;
+    h.attackCooldown = 30 - Math.min(20, h.atkPow * 2);
+    doHeroAttack(s);
+  }
+
+  // Physics
+  h.vy += 0.5; // gravity
+  h.x += h.vx;
+  h.y += h.vy;
+
+  // Floor
+  h.onGround = false;
+  if (h.y + h.h >= GROUND) {
+    h.y = GROUND - h.h;
+    h.vy = 0;
+    h.onGround = true;
+  }
+
+  // Platform collisions
+  for (const p of s.platforms) {
+    if (p.type === 'pit') {
+      // Pit: if hero falls in (below GROUND level, inside pit x range)
+      if (h.x + h.w > p.x && h.x < p.x + p.w && h.y + h.h > GROUND + 4) {
+        heroHit(s, 999);
+      }
+      continue;
+    }
+    if (rectOverlap(h, p)) {
+      // Only land on top
+      if (h.vy >= 0 && h.y + h.h - h.vy <= p.y + 2) {
+        h.y = p.y - h.h;
+        h.vy = 0;
+        h.onGround = true;
+      }
+    }
+  }
+
+  // Keep hero from going left of camera
+  if (h.x < s.camera + 60) h.x = s.camera + 60;
+
+  // Camera follows hero
+  const targetCam = h.x - W * 0.3;
+  s.camera += (targetCam - s.camera) * 0.08;
+
+  // Distance
+  s.distance = Math.max(s.distance, Math.floor(h.x / 10));
+
+  // Generate more world
+  if (s.worldX < s.camera + W + 400) {
+    generateChunk(s, s.worldX);
+    s.worldX += 800;
+  }
+
+  // Cleanup offscreen
+  const cullX = s.camera - 200;
+  s.platforms = s.platforms.filter(p => p.x + p.w > cullX);
+  s.coins     = s.coins.filter(c => c.x > cullX);
+  s.enemies   = s.enemies.filter(e => e.x + e.w > cullX && !e.dead);
+  projectiles = projectiles.filter(p => p.x > cullX && p.x < s.camera + W + 100);
+
+  // Timers
+  if (h.attackTimer > 0) h.attackTimer--;
+  if (h.attackCooldown > 0) h.attackCooldown--;
+  if (h.invTimer > 0) h.invTimer--;
+
+  // Coin collection
+  for (const c of s.coins) {
+    if (!c.collected && rectOverlap(h, c)) {
+      c.collected = true;
+      s.coinCount = (s.coinCount||0) + c.val;
+      spawnParticles(s, c.x+8, c.y+8, '#ffd700', 6);
+    }
+  }
+  s.coins = s.coins.filter(c => !c.collected);
+
+  // Enemy update
+  for (const e of s.enemies) {
+    updateEnemy(s, e);
+  }
+
+  // Projectile update
+  for (const p of projectiles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    // Hero hit by projectile
+    if (p.fromEnemy && !p.hit && rectOverlap(h, p) && h.invTimer <= 0) {
+      p.hit = true;
+      heroHit(s, p.atk);
+    }
+    // Enemy hit by hero projectile
+    if (!p.fromEnemy && !p.hit) {
+      for (const e of s.enemies) {
+        if (!e.dead && rectOverlap(e, p)) {
+          p.hit = true;
+          damageEnemy(s, e, calcDmg(h));
+          break;
+        }
+      }
+    }
+  }
+  projectiles = projectiles.filter(p => p.life > 0 && !p.hit);
+
+  // Particle update
+  for (const p of s.particles) {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+  }
+  s.particles = s.particles.filter(p => p.life > 0);
+
+  // UI
+  document.getElementById('ui-lvl').textContent = h.lvl;
+  document.getElementById('ui-xp').textContent = Math.floor(h.xp);
+  document.getElementById('ui-xnxt').textContent = h.xpNext;
+  document.getElementById('ui-coins').textContent = s.coinCount||0;
+  document.getElementById('ui-dist').textContent = s.distance;
+  document.getElementById('ui-hp').textContent = h.hp;
+  document.getElementById('ui-mhp').textContent = h.maxHp;
+  document.getElementById('ui-atk').textContent = h.atkPow;
+  document.getElementById('ui-jmp').textContent = h.jumpPow;
+}
+
+function calcDmg(h) {
+  let dmg = h.atkPow;
+  if (h._crit && Math.random() < h._crit) dmg *= 3;
+  return dmg;
+}
+
+function doHeroAttack(s) {
+  const h = s.hero;
+  const ax = h.facing === 1 ? h.x + h.w : h.x - 50;
+  const hitbox = { x: ax, y: h.y, w: 50, h: h.h };
+  for (const e of s.enemies) {
+    if (!e.dead && rectOverlap(e, hitbox)) {
+      damageEnemy(s, e, calcDmg(h));
+    }
+  }
+}
+
+function damageEnemy(s, e, dmg) {
+  e.hp -= dmg;
+  e.hitTimer = 12;
+  spawnParticles(s, e.x + e.w/2, e.y + e.h/2, '#ff4444', 5);
+  if (e.hp <= 0) {
+    e.dead = true;
+    gainXP(s, e.xpVal);
+    spawnParticles(s, e.x + e.w/2, e.y + e.h/2, '#ffaa00', 12);
+    // Drop coins
+    const drops = Math.floor(e.xpVal / 4);
+    for (let i = 0; i < drops; i++) {
+      s.coins.push({ x: e.x + Math.random()*e.w, y: e.y, w: 14, h: 14, val: 1, collected: false });
+    }
+  }
+}
+
+function heroHit(s, dmg) {
+  const h = s.hero;
+  if (h.invTimer > 0) return;
+  h.hp -= dmg;
+  h.invTimer = 60;
+  spawnParticles(s, h.x + h.w/2, h.y + h.h/2, '#ff0000', 8);
+  h.vy = -4; // knockback
+  if (h.hp <= 0) {
+    h.hp = 0;
+    s.dead = true;
+    showGameOver(s);
+  }
+}
+
+function gainXP(s, amt) {
+  const h = s.hero;
+  h.xp += amt * (h._xpMult || 1);
+  while (h.xp >= h.xpNext) {
+    h.xp -= h.xpNext;
+    h.lvl++;
+    h.xpNext = Math.floor(h.xpNext * 1.6);
+    showLevelUp(s);
+  }
+}
+
+function updateEnemy(s, e) {
+  if (e.dead) return;
+  const h = s.hero;
+  const dist = h.x - (e.x + e.w/2);
+  const absDist = Math.abs(dist);
+  const dir = dist > 0 ? 1 : -1;
+
+  e.animTimer++;
+  if (e.animTimer > 12) { e.animFrame = (e.animFrame+1)%2; e.animTimer=0; }
+  if (e.hitTimer > 0) e.hitTimer--;
+
+  // Physics
+  e.vy += 0.5;
+  e.y += e.vy;
+  if (e.y + e.h >= GROUND) { e.y = GROUND - e.h; e.vy = 0; e.onGround = true; }
+  else e.onGround = false;
+
+  for (const p of s.platforms) {
+    if (p.type === 'pit') continue;
+    if (rectOverlap(e, p) && e.vy >= 0 && e.y + e.h - e.vy <= p.y + 2) {
+      e.y = p.y - e.h; e.vy = 0; e.onGround = true;
+    }
+  }
+
+  const aggro = absDist < 320;
+
+  switch(e.type) {
+    case 'walker':
+    case 'heavy':
+      if (aggro) {
+        e.vx = dir * e.speed;
+        e.facing = dir;
+      } else {
+        // Patrol
+        e.patrolTimer--;
+        if (e.patrolTimer <= 0) { e.patrolDir *= -1; e.patrolTimer = 60 + Math.random()*60; }
+        e.vx = e.patrolDir * e.speed * 0.5;
+        e.facing = e.patrolDir;
+      }
+      e.x += e.vx;
+      // Contact damage
+      if (absDist < 36 && Math.abs(h.y - e.y) < e.h && s.hero.invTimer <= 0) {
+        heroHit(s, e.atk);
+      }
+      break;
+
+    case 'jumper':
+      if (aggro) {
+        e.facing = dir;
+        e.vx = dir * e.speed;
+        e.x += e.vx;
+        if (e.jumpCd > 0) e.jumpCd--;
+        if (e.onGround && absDist < 200 && e.jumpCd <= 0) {
+          e.vy = -9;
+          e.jumpCd = 40;
+        }
+        if (absDist < 36 && Math.abs(h.y - e.y) < e.h && s.hero.invTimer <= 0) {
+          heroHit(s, e.atk);
+        }
+      }
+      break;
+
+    case 'shooter':
+      e.facing = dir;
+      if (aggro && e.shootCd <= 0 && absDist > 80) {
+        // Shoot
+        e.shootCd = 90;
+        const speed = 4;
+        projectiles.push({
+          x: e.x + e.w/2, y: e.y + e.h/2 - 6,
+          vx: dir * speed, vy: -0.5,
+          w: 10, h: 10, life: 80, fromEnemy: true, hit: false,
+          atk: e.projAtk, color: '#c040e0'
+        });
+      }
+      if (e.shootCd > 0) e.shootCd--;
+      // Slowly retreat if hero close
+      if (absDist < 120) e.x -= dir * e.speed;
+      break;
+  }
+}
+
+function spawnParticles(s, x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    s.particles.push({
+      x, y,
+      vx: (Math.random()-0.5)*4,
+      vy: (Math.random()-0.5)*4 - 2,
+      life: 20 + Math.random()*20,
+      color, size: 3 + Math.random()*4
+    });
+  }
+}
+
+// ---- Drawing ----
+function draw(s) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(-s.camera, 0);
+
+  drawBackground(s);
+  drawPlatforms(s);
+  drawCoins(s);
+  drawEnemies(s);
+  drawHero(s);
+  drawProjectiles(s);
+  drawParticles(s);
+
+  ctx.restore();
+
+  // HUD HP bar
+  drawHUD(s);
+}
+
+function drawBackground(s) {
+  // Sky gradient
+  const grd = ctx.createLinearGradient(s.camera, 0, s.camera, H);
+  const t = Math.min(1, s.distance / 3000);
+  const r = Math.floor(20 + t*60), g = Math.floor(20 + t*10), b = Math.floor(40 + t*40);
+  grd.addColorStop(0, `rgb(${r},${g},${b})`);
+  grd.addColorStop(1, '#111118');
+  ctx.fillStyle = grd;
+  ctx.fillRect(s.camera, 0, W, H);
+
+  // Parallax hills/clouds
+  const cx = s.camera;
+  ctx.fillStyle = `rgba(40,40,80,0.4)`;
+  for (let i = 0; i < 6; i++) {
+    const hx = ((cx * 0.3 + i * 280) % (W + 200)) + cx - 100;
+    ctx.beginPath();
+    ctx.arc(hx, GROUND - 20, 80 + i*20, Math.PI, 0);
+    ctx.fill();
+  }
+
+  // Ground
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(s.camera - 10, GROUND, W + 20, H - GROUND + 10);
+  ctx.fillStyle = '#2a2a4e';
+  ctx.fillRect(s.camera - 10, GROUND, W + 20, 8);
+}
+
+function drawPlatforms(s) {
+  for (const p of s.platforms) {
+    if (p.x + p.w < s.camera - 10 || p.x > s.camera + W + 10) continue;
+    if (p.type === 'pit') {
+      // Draw pit / gap
+      ctx.fillStyle = '#050508';
+      ctx.fillRect(p.x, GROUND, p.w, H - GROUND + 10);
+      ctx.fillStyle = '#ff2200';
+      ctx.fillRect(p.x, GROUND + p.h, p.w, 4);
+      continue;
+    }
+    // Platform
+    ctx.fillStyle = '#3a3a6e';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = '#5a5a9e';
+    ctx.fillRect(p.x, p.y, p.w, 4);
+    // Grass bits
+    ctx.fillStyle = '#4a8a4a';
+    for (let gx = p.x + 4; gx < p.x + p.w - 4; gx += 12) {
+      ctx.fillRect(gx, p.y - 3, 6, 4);
+    }
+  }
+}
+
+function drawCoins(s) {
+  s.coins.forEach(c => {
+    if (c.x < s.camera - 20 || c.x > s.camera + W + 20) return;
+    const pulse = 0.8 + 0.2*Math.sin(s.frameCount * 0.1 + c.x * 0.01);
+    ctx.fillStyle = `rgba(255,215,0,${pulse})`;
+    ctx.beginPath();
+    ctx.arc(c.x + c.w/2, c.y + c.h/2, c.w/2 * pulse, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+}
+
+function drawHero(s) {
+  const h = s.hero;
+  const blink = h.invTimer > 0 && Math.floor(h.invTimer / 4) % 2 === 0;
+  if (blink) return;
+
+  ctx.save();
+  ctx.translate(h.x + h.w/2, h.y + h.h/2);
+  if (h.facing === -1) ctx.scale(-1, 1);
+
+  // Body
+  ctx.fillStyle = '#4080ff';
+  ctx.fillRect(-h.w/2, -h.h/2, h.w, h.h);
+
+  // Head
+  ctx.fillStyle = '#f0c080';
+  ctx.fillRect(-h.w/2 + 4, -h.h/2 - 12, h.w - 8, 14);
+
+  // Eyes
+  ctx.fillStyle = '#222';
+  ctx.fillRect(2, -h.h/2 - 8, 4, 4);
+
+  // Legs (animated walk)
+  const legSwing = h.onGround ? Math.sin(s.frameCount * 0.3) * 6 : 0;
+  ctx.fillStyle = '#2050cc';
+  ctx.fillRect(-h.w/2 + 2, h.h/2 - 8, 10, 8 + legSwing);
+  ctx.fillRect(h.w/2 - 12, h.h/2 - 8, 10, 8 - legSwing);
+
+  // Attack flash
+  if (h.attackTimer > 10) {
+    ctx.fillStyle = 'rgba(255,200,50,0.7)';
+    ctx.fillRect(h.w/2 - 2, -h.h/4, 20, h.h/2);
+  }
+
+  ctx.restore();
+
+  // HP bar above hero
+  const barW = 32, barH = 4;
+  const bx = h.x + h.w/2 - barW/2;
+  const by = h.y - 14;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(bx, by, barW, barH);
+  ctx.fillStyle = h.hp > h.maxHp*0.4 ? '#44ee44' : '#ee4444';
+  ctx.fillRect(bx, by, barW * (h.hp/h.maxHp), barH);
+}
+
+function drawEnemies(s) {
+  for (const e of s.enemies) {
+    if (e.dead) continue;
+    if (e.x + e.w < s.camera - 10 || e.x > s.camera + W + 10) continue;
+
+    ctx.save();
+    ctx.translate(e.x + e.w/2, e.y + e.h/2);
+    if (e.facing === -1) ctx.scale(-1, 1);
+
+    const flash = e.hitTimer > 0;
+    ctx.fillStyle = flash ? '#ffffff' : e.color;
+    ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
+
+    // Eyes
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(e.w/4 - 3, -e.h/2 + 4, 6, 6);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(e.w/4, -e.h/2 + 5, 3, 4);
+
+    // Shooter triangle
+    if (e.type === 'shooter') {
+      ctx.fillStyle = '#fff5';
+      ctx.beginPath();
+      ctx.moveTo(e.w/2, 0);
+      ctx.lineTo(e.w/2 + 8, -4);
+      ctx.lineTo(e.w/2 + 8, 4);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    // HP bar
+    const barW = e.w + 4;
+    const bx = e.x - 2;
+    const by = e.y - 8;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(bx, by, barW, 4);
+    ctx.fillStyle = '#ee4444';
+    ctx.fillRect(bx, by, barW * (e.hp/e.maxHp), 4);
+  }
+}
+
+function drawProjectiles(s) {
+  for (const p of projectiles) {
+    ctx.fillStyle = p.color || '#ffee44';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#fff8';
+    ctx.beginPath();
+    ctx.arc(p.x - p.vx, p.y - p.vy, 3, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawParticles(s) {
+  for (const p of s.particles) {
+    ctx.globalAlpha = p.life / 40;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD(s) {
+  // XP bar at bottom
+  const h = s.hero;
+  const xpW = W * (h.xp / h.xpNext);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0, H - 6, W, 6);
+  ctx.fillStyle = '#8844ff';
+  ctx.fillRect(0, H - 6, xpW, 6);
+
+  // Controls hint (fades out)
+  if (s.frameCount < 200) {
+    ctx.globalAlpha = Math.max(0, 1 - s.frameCount/180);
+    ctx.fillStyle = '#fff';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Arrow Keys / WASD: Move & Jump   Z/X/Enter: Attack', W/2, H - 18);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---- Level Up UI ----
+function showLevelUp(s) {
+  s.paused = true;
+  const screen = document.getElementById('upgrade-screen');
+  const cards = document.getElementById('upgrade-cards');
+  cards.innerHTML = '';
+  const upgrades = pickUpgrades();
+
+  upgrades.forEach(u => {
+    const div = document.createElement('div');
+    div.className = 'upgrade-card';
+    div.innerHTML = `<div class="icon">${u.icon}</div><div class="name">${u.name}</div><div class="desc">${u.desc}</div>`;
+    div.onclick = () => {
+      u.apply(s.hero, s);
+      screen.classList.remove('show');
+      s.paused = false;
+    };
+    cards.appendChild(div);
+  });
+
+  screen.classList.add('show');
+}
+
+function showGameOver(s) {
+  const el = document.getElementById('gameover');
+  document.getElementById('go-stats').innerHTML =
+    `Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount||0}`;
+  el.style.display = 'block';
+}
+
+function restartGame() {
+  document.getElementById('gameover').style.display = 'none';
+  document.getElementById('upgrade-screen').classList.remove('show');
+  projectiles = [];
+  state = createState();
+  // Pre-generate initial world
+  generateChunk(state, 300);
+  state.worldX = 1100;
+  state.coinCount = 0;
+}
+
+// ---- Collision ----
+function rectOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// ---- Input ----
+window.addEventListener('keydown', e => {
+  if (state) state.keys[e.key] = true;
+  if ([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  if (state) state.keys[e.key] = false;
+});
+
+// ---- Loop ----
+function loop() {
+  update(state);
+  draw(state);
+  requestAnimationFrame(loop);
+}
+
+// ---- Start ----
+restartGame();
+loop();
+</script>
+</body>
+</html>
