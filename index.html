@@ -7,9 +7,9 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; font-family: monospace; overflow: hidden; }
-  #scale-wrapper { transform-origin: top center; flex-shrink: 0; }
-  canvas { border: 2px solid #333; display: block; touch-action: none; }
-  #ui { color: #fff; font-size: 13px; width: 800px; display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
+  #scale-wrapper { flex-shrink: 0; }
+  canvas { border: 2px solid #333; display: block; touch-action: none; width: min(800px, 100vw); height: auto; }
+  #ui { color: #fff; font-size: clamp(9px, 2vw, 13px); width: min(800px, 100vw); display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
   .overlay {
     display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.9); color: #fff; flex-direction: column;
@@ -96,8 +96,8 @@
   <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0</span>m &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
   <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span> &nbsp;<span style="color:#aaa">[B]Shop</span></span>
 </div>
-<canvas id="c" width="800" height="440"></canvas>
 </div>
+<canvas id="c" width="800" height="440"></canvas>
 
 <div id="mobile-controls">
   <div id="mc-left">
@@ -141,7 +141,8 @@
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
-const GROUND = H - 60;
+let GROUND = H - 60;
+let gameZoom = 1;
 
 // ---- Biomes (20) ----
 const BIOMES = [
@@ -276,7 +277,8 @@ function generateChunk(s, fromX) {
   const diffMult = 1 + s.distance/2000;
   const numPlat = 3 + Math.floor(Math.random()*3);
   for(let i=0;i<numPlat;i++){
-    const x=fromX+Math.random()*800, y=GROUND-80-Math.random()*160, w=80+Math.random()*120;
+    const platMaxH=Math.min(GROUND*0.65,160);
+    const x=fromX+Math.random()*800, y=GROUND-40-Math.random()*platMaxH, w=80+Math.random()*120;
     s.platforms.push({x,y,w,h:16,type:'platform'});
     if(Math.random()<0.7) s.coins.push({x:x+w/2-8,y:y-24,w:16,h:16,val:1,collected:false});
     if(Math.random()<0.4) for(let j=0;j<3;j++) s.coins.push({x:x+j*24,y:y-24,w:16,h:16,val:1,collected:false});
@@ -356,15 +358,15 @@ function update(s) {
   }
 
   if(h.x<s.camera+60) h.x=s.camera+60;
-  s.camera+=(h.x-W*0.3-s.camera)*0.08;
+  s.camera+=(h.x-(W/gameZoom)*0.3-s.camera)*0.08;
   s.distance=Math.max(s.distance,Math.floor(h.x/10));
-  if(s.worldX<s.camera+W+400){generateChunk(s,s.worldX);s.worldX+=800;}
+  if(s.worldX<s.camera+W/gameZoom+400){generateChunk(s,s.worldX);s.worldX+=800;}
 
   const cullX=s.camera-200;
   s.platforms=s.platforms.filter(p=>p.x+p.w>cullX);
   s.coins=s.coins.filter(c=>c.x>cullX);
   s.enemies=s.enemies.filter(e=>e.x+e.w>cullX&&!e.dead);
-  projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W+100);
+  projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoom+100);
 
   if(h.attackTimer>0) h.attackTimer--;
   if(h.attackCooldown>0) h.attackCooldown--;
@@ -563,6 +565,7 @@ function spawnParticles(s,x,y,color,count){
 function draw(s){
   ctx.clearRect(0,0,W,H);
   ctx.save();
+  ctx.scale(gameZoom,gameZoom);
   ctx.translate(-s.camera,0);
   const bm=getBiome(s.distance);
   drawBackground(s,bm);
@@ -577,12 +580,13 @@ function draw(s){
 }
 
 function drawBackground(s,bm){
-  const grd=ctx.createLinearGradient(s.camera,0,s.camera,H);
+  const VW=W/gameZoom,VH=H/gameZoom;
+  const grd=ctx.createLinearGradient(s.camera,0,s.camera,VH);
   grd.addColorStop(0,rgb(bm.sky0));grd.addColorStop(1,rgb(bm.sky1));
-  ctx.fillStyle=grd;ctx.fillRect(s.camera,0,W,H);
+  ctx.fillStyle=grd;ctx.fillRect(s.camera,0,VW,VH);
   if(bm.isSpace){
     for(let i=0;i<80;i++){
-      const wx=s.camera+(i*137%(W+200))-100,wy=(i*71)%(H-80);
+      const wx=s.camera+(i*137%(VW+200))-100,wy=(i*71)%(VH-40);
       ctx.globalAlpha=0.4+0.4*Math.sin(s.frameCount*0.04+i*0.9);
       ctx.fillStyle='#fff';ctx.fillRect(wx,wy,1+(i%3===0?1:0),1+(i%3===0?1:0));
     }
@@ -590,16 +594,16 @@ function drawBackground(s,bm){
   }
   ctx.fillStyle=rgba(bm.bg,bm.bgA);
   for(let i=0;i<6;i++){
-    const hx=((s.camera*0.3+i*280)%(W+200))+s.camera-100;
+    const hx=((s.camera*0.3+i*280)%(VW+200))+s.camera-100;
     ctx.beginPath();ctx.arc(hx,GROUND-20,80+i*20,Math.PI,0);ctx.fill();
   }
-  ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(s.camera-10,GROUND,W+20,H-GROUND+10);
-  ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(s.camera-10,GROUND,W+20,8);
+  ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(s.camera-10,GROUND,VW+20,VH-GROUND+10);
+  ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(s.camera-10,GROUND,VW+20,8);
 }
 
 function drawPlatforms(s,bm){
   for(const p of s.platforms){
-    if(p.x+p.w<s.camera-10||p.x>s.camera+W+10) continue;
+    if(p.x+p.w<s.camera-10||p.x>s.camera+W/gameZoom+10) continue;
     if(p.type==='pit'){
       ctx.fillStyle=rgb(bm.sky1);ctx.fillRect(p.x,GROUND,p.w,H-GROUND+10);
       ctx.fillStyle='#ff2200';ctx.fillRect(p.x,GROUND+p.h,p.w,4);
@@ -614,7 +618,7 @@ function drawPlatforms(s,bm){
 
 function drawCoins(s){
   s.coins.forEach(c=>{
-    if(c.x<s.camera-20||c.x>s.camera+W+20) return;
+    if(c.x<s.camera-20||c.x>s.camera+W/gameZoom+20) return;
     const pulse=0.8+0.2*Math.sin(s.frameCount*0.1+c.x*0.01);
     ctx.fillStyle=`rgba(255,215,0,${pulse})`;
     ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2*pulse,0,Math.PI*2);ctx.fill();
@@ -716,7 +720,7 @@ function drawHero(s){
 
 function drawEnemies(s){
   for(const e of s.enemies){
-    if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W+10) continue;
+    if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W/gameZoom+10) continue;
     const tier=e.tier||0;
     const flash=e.hitTimer>0;
     const t=s.frameCount;
@@ -945,16 +949,19 @@ canvas.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
 
 // ---- Responsive scaling ----
 function resizeGame(){
-  const wrapper  = document.getElementById('scale-wrapper');
-  const controls = document.getElementById('mobile-controls');
-  const gameW=800, gameH=472;
-  const cH = controls.offsetHeight||0;
-  const scale = Math.min(1, window.innerWidth/gameW, (window.innerHeight-cH)/gameH);
-  wrapper.style.width  = gameW+'px';
-  wrapper.style.height = gameH+'px';
-  wrapper.style.transform = `scale(${scale})`;
-  // collapse the dead space left by CSS transform (which doesn't affect layout)
-  wrapper.style.marginBottom = `-${Math.round(gameH*(1-scale))}px`;
+  const vw = Math.min(window.innerWidth, W);
+  const newZoom = Math.max(1, W / vw);
+  const newGROUND = Math.floor(H / newZoom - 50);
+  if(state && newGROUND !== GROUND){
+    const delta = newGROUND - GROUND;
+    state.hero.y += delta;
+    for(const p of state.platforms) p.y += delta;
+    for(const c of state.coins) c.y += delta;
+    for(const e of state.enemies) e.y += delta;
+    for(const p of projectiles) p.y += delta;
+  }
+  gameZoom = newZoom;
+  GROUND = newGROUND;
 }
 window.addEventListener('resize', resizeGame);
 
