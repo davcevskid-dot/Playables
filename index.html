@@ -6,7 +6,7 @@
 <title>Forward Platformer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; font-family: monospace; overflow: hidden; }
+  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: safe center; height: 100dvh; font-family: monospace; overflow: hidden; touch-action: none; }
   #scale-wrapper { flex-shrink: 0; }
   canvas { border: 2px solid #333; display: block; touch-action: none; width: min(800px, 100vw); height: auto; }
   #ui { color: #fff; font-size: clamp(9px, 2vw, 13px); width: min(800px, 100vw); display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
@@ -94,7 +94,7 @@
 <div id="ui">
   <span>LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
   <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0</span>m &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
-  <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span> &nbsp;<span style="color:#aaa">[B]Shop</span></span>
+  <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span></span>
 </div>
 </div>
 <canvas id="c" width="800" height="440"></canvas>
@@ -143,6 +143,8 @@ const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 let GROUND = H - 60;
 let gameZoom = 1;
+const SKY_THRESHOLD = -350; // world-y below this = Sky Kingdom
+const SKY_BIOME = { name:'Sky Kingdom', sky0:[135,206,250], sky1:[255,255,255], gnd:[200,230,255], gndA:[255,255,255], plt:[220,240,255], pltA:[255,255,255], bg:[170,220,255], bgA:0.25 };
 
 // ---- Biomes (20) ----
 const BIOMES = [
@@ -208,6 +210,12 @@ const WEAPON_DEFS = {
     descs: ['AOE blast, 8 dmg','Bigger radius, 12 dmg','More damage, 18 dmg','Leaves fire, 25 dmg','Massive AOE, 34 dmg'],
     cost: lvl => Math.round(65 * Math.pow(1.7, lvl)),
   },
+  jetpack: {
+    icon:'🚀', name:'JetPack', key:'[↑ hold]', baseCost:80,
+    maxLevel:5,
+    descs:['Basic thruster, limited fuel','More fuel & power','Extended altitude flight','High-altitude explorer','⭐ Legendary! Reach the Sky Kingdom!'],
+    cost: lvl => Math.round(80 * Math.pow(1.7, lvl)),
+  },
 };
 const SWORD_DMG   = [0, 4, 8, 12, 16, 20];
 const SWORD_RANGE = [0, 70, 90, 110, 130, 155];
@@ -217,6 +225,10 @@ const GUN_CD      = [0, 38, 30, 24, 20, 16];
 const FB_DMG      = [0, 8, 12, 18, 25, 34];
 const FB_RADIUS   = [0, 55, 72, 92, 112, 135];
 const FB_CD       = [0, 100, 85, 68, 52, 38];
+const JP_FUEL  = [0, 150, 250, 380, 540, 750];
+const JP_THRUST= [0, 0.35, 0.40, 0.45, 0.50, 0.55];
+const JP_VMAX  = [0, 5, 6, 7, 8, 9];
+const JP_REGEN = [0, 1.5, 2.0, 2.5, 3.0, 3.5];
 
 // ---- Shop consumables ----
 const SHOP_ITEMS = [
@@ -262,11 +274,12 @@ function createState() {
       hp:5, maxHp:5,
       lvl:1, xp:0, xpNext:20,
       atkPow:1, defense:0, jumpPow:1, speed:1,
-      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0} },
-      gunCooldown:0, fireballCooldown:0,
+      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, jetpack:{level:0} },
+      gunCooldown:0, fireballCooldown:0, jetpackFuel:0, jetting:false,
     },
     platforms:[], coins:[], enemies:[], particles:[],
     worldX:0, keys:{}, frameCount:0,
+    cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
   };
 }
 
@@ -314,6 +327,22 @@ function spawnEnemy(x,type,lvl,diff,dist){
   }
 }
 
+function generateSkyChunk(s, fromX) {
+  const n = 2 + Math.floor(Math.random()*3);
+  for(let i=0;i<n;i++){
+    const x=fromX+50+Math.random()*550, y=SKY_THRESHOLD-50-Math.random()*220, w=90+Math.random()*140;
+    s.platforms.push({x,y,w,h:22,type:'cloud'});
+    for(let j=0;j<2+Math.floor(Math.random()*3);j++)
+      s.coins.push({x:x+j*30+Math.random()*10,y:y-22,w:16,h:16,val:3,collected:false});
+  }
+  if(Math.random()<0.8){
+    const ex=fromX+50+Math.random()*500, ey=SKY_THRESHOLD-60-Math.random()*180;
+    s.enemies.push({x:ex,y:ey,w:28,h:28,vx:0,vy:0,onGround:false,facing:-1,
+      type:'angel',tier:2,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+      hp:6,maxHp:6,atk:2,speed:1.8,xpVal:25,color:'#ffffcc',flySine:Math.random()*Math.PI*2});
+  }
+}
+
 // ---- Game Logic ----
 let projectiles = [];
 
@@ -335,6 +364,22 @@ function update(s) {
   else h.vx*=0.7;
 
   if(jump&&h.onGround){h.vy=-(8+h.jumpPow*2.5);h.onGround=false;}
+  const jpLvl=h.weapons.jetpack.level;
+  if(jpLvl>0){
+    if(jump&&!h.onGround&&h.jetpackFuel>0){
+      h.vy=Math.max(h.vy-JP_THRUST[jpLvl],-JP_VMAX[jpLvl]);
+      h.jetpackFuel=Math.max(0,h.jetpackFuel-1);
+      h.jetting=true;
+    } else {
+      h.jetting=false;
+      const regen=h.onGround?JP_REGEN[jpLvl]*3:JP_REGEN[jpLvl]*0.3;
+      h.jetpackFuel=Math.min(JP_FUEL[jpLvl],h.jetpackFuel+regen);
+    }
+    if(h.jetting&&s.frameCount%3===0){
+      spawnParticles(s,h.x+h.w*0.35,h.y+h.h,'#ff4400',2);
+      spawnParticles(s,h.x+h.w*0.65,h.y+h.h,'#ff4400',2);
+    }
+  } else { h.jetting=false; }
 
   const swordLvl=h.weapons.sword.level;
   if(atk&&h.attackCooldown<=0){
@@ -359,8 +404,20 @@ function update(s) {
 
   if(h.x<s.camera+60) h.x=s.camera+60;
   s.camera+=(h.x-(W/gameZoom)*0.3-s.camera)*0.08;
+  const targetCY=h.y+h.h/2-H/(gameZoom*2);
+  s.cameraY+=(Math.max(0,targetCY)-s.cameraY)*0.1;
   s.distance=Math.max(s.distance,Math.floor(h.x/10));
   if(s.worldX<s.camera+W/gameZoom+400){generateChunk(s,s.worldX);s.worldX+=800;}
+  const wasInSky=s.inSkyKingdom;
+  s.inSkyKingdom=h.y<SKY_THRESHOLD;
+  if(s.inSkyKingdom&&!wasInSky) s.skyAlert=240;
+  if(s.inSkyKingdom){
+    const seg=Math.floor(s.camera/600);
+    for(let i=seg-1;i<=seg+2;i++){
+      if(!s.skySegments.has(i)){s.skySegments.add(i);generateSkyChunk(s,i*600);}
+    }
+  }
+  if(s.skyAlert>0) s.skyAlert--;
 
   const cullX=s.camera-200;
   s.platforms=s.platforms.filter(p=>p.x+p.w>cullX);
@@ -523,6 +580,13 @@ function updateEnemy(s,e){
   e.animTimer++;
   if(e.animTimer>12){e.animFrame=(e.animFrame+1)%2;e.animTimer=0;}
   if(e.hitTimer>0) e.hitTimer--;
+  if(e.type==='angel'){
+    e.flySine=(e.flySine||0)+0.04;
+    e.y+=Math.sin(e.flySine)*0.8;
+    if(aggro){e.vx=dir*e.speed;e.x+=e.vx;e.facing=dir;
+      if(absDist<36&&Math.abs(h.y-e.y)<e.h+20&&h.invTimer<=0) heroHit(s,e.atk);}
+    return;
+  }
   e.vy+=0.5; e.y+=e.vy;
   if(e.y+e.h>=GROUND){e.y=GROUND-e.h;e.vy=0;e.onGround=true;}else e.onGround=false;
   for(const p of s.platforms){
@@ -566,7 +630,7 @@ function draw(s){
   ctx.clearRect(0,0,W,H);
   ctx.save();
   ctx.scale(gameZoom,gameZoom);
-  ctx.translate(-s.camera,0);
+  ctx.translate(-s.camera,-s.cameraY);
   const bm=getBiome(s.distance);
   drawBackground(s,bm);
   drawPlatforms(s,bm);
@@ -581,29 +645,59 @@ function draw(s){
 
 function drawBackground(s,bm){
   const VW=W/gameZoom,VH=H/gameZoom;
-  const grd=ctx.createLinearGradient(s.camera,0,s.camera,VH);
-  grd.addColorStop(0,rgb(bm.sky0));grd.addColorStop(1,rgb(bm.sky1));
-  ctx.fillStyle=grd;ctx.fillRect(s.camera,0,VW,VH);
-  if(bm.isSpace){
+  const cy=s.cameraY||0;
+  // Blend toward Sky Kingdom as hero flies higher
+  const skyBlend=Math.max(0,Math.min(1,(-s.hero.y-100)/300));
+  const sBm=skyBlend>0?{
+    sky0:lerpRGB(bm.sky0,SKY_BIOME.sky0,skyBlend),sky1:lerpRGB(bm.sky1,SKY_BIOME.sky1,skyBlend),
+    bg:lerpRGB(bm.bg,SKY_BIOME.bg,skyBlend),bgA:bm.bgA+(SKY_BIOME.bgA-bm.bgA)*skyBlend,
+  }:bm;
+  const grd=ctx.createLinearGradient(s.camera,cy,s.camera,cy+VH);
+  grd.addColorStop(0,rgb(sBm.sky0));grd.addColorStop(1,rgb(sBm.sky1));
+  ctx.fillStyle=grd;ctx.fillRect(s.camera,cy,VW,VH);
+  if(bm.isSpace&&skyBlend<0.5){
     for(let i=0;i<80;i++){
-      const wx=s.camera+(i*137%(VW+200))-100,wy=(i*71)%(VH-40);
+      const wx=s.camera+(i*137%(VW+200))-100,wy=cy+(i*71)%(VH-40);
       ctx.globalAlpha=0.4+0.4*Math.sin(s.frameCount*0.04+i*0.9);
       ctx.fillStyle='#fff';ctx.fillRect(wx,wy,1+(i%3===0?1:0),1+(i%3===0?1:0));
     }
     ctx.globalAlpha=1;
   }
-  ctx.fillStyle=rgba(bm.bg,bm.bgA);
+  // Sky Kingdom cloud wisps in background
+  if(skyBlend>0.05){
+    ctx.globalAlpha=skyBlend*0.28;
+    ctx.fillStyle='#ffffff';
+    for(let i=0;i<8;i++){
+      const hx=((s.camera*0.12+i*340)%(VW+400))+s.camera-200;
+      const hy=cy+VH*0.15+i*VH*0.09;
+      ctx.beginPath();ctx.ellipse(hx,hy,110+i*18,18,0,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle=rgba(sBm.bg,sBm.bgA);
   for(let i=0;i<6;i++){
     const hx=((s.camera*0.3+i*280)%(VW+200))+s.camera-100;
     ctx.beginPath();ctx.arc(hx,GROUND-20,80+i*20,Math.PI,0);ctx.fill();
   }
-  ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(s.camera-10,GROUND,VW+20,VH-GROUND+10);
-  ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(s.camera-10,GROUND,VW+20,8);
+  if(cy+VH>GROUND){
+    ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(s.camera-10,GROUND,VW+20,cy+VH-GROUND+10);
+    ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(s.camera-10,GROUND,VW+20,8);
+  }
 }
 
 function drawPlatforms(s,bm){
   for(const p of s.platforms){
     if(p.x+p.w<s.camera-10||p.x>s.camera+W/gameZoom+10) continue;
+    if(p.type==='cloud'){
+      ctx.save();ctx.globalAlpha=0.93;
+      ctx.fillStyle='rgba(235,248,255,1)';
+      ctx.beginPath();ctx.ellipse(p.x+p.w/2,p.y+p.h/2,p.w/2,p.h*0.7,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.88)';
+      ctx.beginPath();ctx.ellipse(p.x+p.w*0.35,p.y,p.w*0.28,p.h*0.85,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(p.x+p.w*0.7,p.y-2,p.w*0.24,p.h*0.8,0,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;ctx.restore();
+      continue;
+    }
     if(p.type==='pit'){
       ctx.fillStyle=rgb(bm.sky1);ctx.fillRect(p.x,GROUND,p.w,H-GROUND+10);
       ctx.fillStyle='#ff2200';ctx.fillRect(p.x,GROUND+p.h,p.w,4);
@@ -716,11 +810,50 @@ function drawHero(s){
   ctx.fillStyle='#333';ctx.fillRect(bx,by,barW,barH);
   ctx.fillStyle=h.hp>h.maxHp*0.4?'#44ee44':'#ee4444';
   ctx.fillRect(bx,by,barW*(h.hp/h.maxHp),barH);
+  // Jetpack
+  const jpLvl2=h.weapons.jetpack.level;
+  if(jpLvl2>0){
+    if(h.jetting){
+      ctx.globalAlpha=0.65+0.35*Math.random();
+      ctx.fillStyle='#ff5500';
+      ctx.beginPath();ctx.arc(h.x+h.w*0.33,h.y+h.h+10,5+jpLvl2*1.5,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(h.x+h.w*0.67,h.y+h.h+10,5+jpLvl2*1.5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#ffcc00';
+      ctx.beginPath();ctx.arc(h.x+h.w*0.33,h.y+h.h+5,2+jpLvl2,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(h.x+h.w*0.67,h.y+h.h+5,2+jpLvl2,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+    const fuelPct=h.jetpackFuel/JP_FUEL[jpLvl2];
+    const fbX=h.x+h.w/2-barW/2,fbY=h.y-20;
+    ctx.fillStyle='#222';ctx.fillRect(fbX,fbY,barW,barH);
+    ctx.fillStyle=fuelPct>0.3?'#00aaff':'#ff6600';
+    ctx.fillRect(fbX,fbY,barW*Math.max(0,fuelPct),barH);
+  }
 }
 
 function drawEnemies(s){
   for(const e of s.enemies){
     if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W/gameZoom+10) continue;
+    if(e.type==='angel'){
+      const flash=e.hitTimer>0;
+      ctx.save();
+      ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      if(e.facing===-1) ctx.scale(-1,1);
+      ctx.globalAlpha=0.22+0.1*Math.sin(s.frameCount*0.1);
+      ctx.fillStyle='#ffffaa';ctx.beginPath();ctx.arc(0,0,e.w/2+10,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle=flash?'#fff':'rgba(200,230,255,0.88)';
+      ctx.beginPath();ctx.ellipse(-e.w*0.85,0,e.w*0.52,e.h*0.24,0.2,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse( e.w*0.85,0,e.w*0.52,e.h*0.24,-0.2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=flash?'#fff':'#ffffd8';ctx.beginPath();ctx.arc(0,0,e.w/2,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
+      ctx.beginPath();ctx.ellipse(0,-e.h/2-5,8,3,0,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle='#5555ff';ctx.beginPath();ctx.arc(3,-2,3,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+      ctx.fillStyle='#333';ctx.fillRect(e.x-2,e.y-10,e.w+4,4);
+      ctx.fillStyle='#ffe000';ctx.fillRect(e.x-2,e.y-10,(e.w+4)*(e.hp/e.maxHp),4);
+      continue;
+    }
     const tier=e.tier||0;
     const flash=e.hitTimer>0;
     const t=s.frameCount;
@@ -806,10 +939,12 @@ function drawHUD(s){
   ctx.fillStyle='#8844ff';ctx.fillRect(0,H-6,W*(h.xp/h.xpNext),6);
 
   // Weapon cooldown HUD (top-right of canvas)
+  const jpFuelMax=JP_FUEL[h.weapons.jetpack.level]||1;
   const weapons=[
     {key:'sword',icon:'🗡️',cd:0,maxCd:1,hint:'Z/X'},
     {key:'gun',  icon:'🔫',cd:h.gunCooldown,maxCd:GUN_CD[h.weapons.gun.level]||38,hint:'C'},
     {key:'fireball',icon:'🔥',cd:h.fireballCooldown,maxCd:FB_CD[h.weapons.fireball.level]||100,hint:'V'},
+    {key:'jetpack',icon:'🚀',cd:jpFuelMax-h.jetpackFuel,maxCd:jpFuelMax,hint:'↑hold'},
   ].filter(w=>h.weapons[w.key].level>0);
 
   let wx=W-8;
@@ -831,12 +966,19 @@ function drawHUD(s){
   }
   ctx.textAlign='left';
 
-  // Controls hint
-  if(s.frameCount<280){
-    ctx.globalAlpha=Math.max(0,1-s.frameCount/240);
-    ctx.fillStyle='#fff';ctx.font='12px monospace';ctx.textAlign='center';
-    ctx.fillText('WASD: Move/Jump  Z/X: Attack  C: Gun  V: Fireball  B: Shop',W/2,H-18);
-    ctx.textAlign='left';ctx.globalAlpha=1;
+  // Sky Kingdom alert
+  if(s.skyAlert>0){
+    const a=Math.min(1,s.skyAlert/60);
+    ctx.save();ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(135,206,250,0.92)';
+    ctx.fillRect(W/2-185,H/2-36,370,72);
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=3;
+    ctx.strokeRect(W/2-185,H/2-36,370,72);
+    ctx.fillStyle='#002244';ctx.font='bold 25px monospace';ctx.textAlign='center';
+    ctx.fillText('✨ SKY KINGDOM ✨',W/2,H/2-4);
+    ctx.font='13px monospace';ctx.fillStyle='#003366';
+    ctx.fillText('You have reached the heavens!',W/2,H/2+22);
+    ctx.textAlign='left';ctx.restore();
   }
 }
 
@@ -902,7 +1044,12 @@ function renderShop(){
       <div class="s-name">${def.name} ${badge}</div>
       <div class="s-desc">${descText}<br><small style="color:#777">${def.key}</small></div>
       <div class="s-cost">${isMax?'✓ MAX':'🪙 '+cost}</div>`;
-    if(can) div.onclick=()=>{state.coinCount-=cost;state.hero.weapons[key].level++;renderShop();};
+    if(can) div.onclick=()=>{
+      state.coinCount-=cost;
+      state.hero.weapons[key].level++;
+      if(key==='jetpack') state.hero.jetpackFuel=JP_FUEL[state.hero.weapons.jetpack.level];
+      renderShop();
+    };
     wpn.appendChild(div);
   });
 }
