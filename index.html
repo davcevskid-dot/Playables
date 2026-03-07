@@ -6,10 +6,10 @@
 <title>Forward Platformer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: safe center; height: 100dvh; font-family: monospace; overflow: hidden; touch-action: none; }
-  #scale-wrapper { flex-shrink: 0; }
-  canvas { border: 2px solid #333; display: block; touch-action: none; width: min(800px, 100vw); height: auto; }
-  #ui { color: #fff; font-size: clamp(9px, 2vw, 13px); width: min(800px, 100vw); display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
+  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100dvh; font-family: monospace; overflow: hidden; touch-action: none; }
+  #scale-wrapper { flex-shrink: 0; width: 100%; }
+  canvas { border: none; display: block; touch-action: none; }
+  #ui { color: #fff; font-size: clamp(9px, 2vw, 13px); width: 100%; display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
   .overlay {
     display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.9); color: #fff; flex-direction: column;
@@ -67,26 +67,41 @@
     padding: 8px 14px; padding-bottom: max(8px, env(safe-area-inset-bottom));
     background: rgba(0,0,0,0.35); gap: 0;
   }
-  #mc-left { display: flex; gap: 8px; align-items: center; }
+  #mc-left { display: flex; align-items: center; justify-content: flex-start; }
   #mc-mid  { display: flex; align-items: center; justify-content: center; }
   #mc-right { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
   .mc-btn {
-    width: 56px; height: 56px;
+    width: 60px; height: 60px;
     background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.22);
-    border-radius: 12px; color: #fff; font-size: 22px; cursor: pointer;
+    border-radius: 14px; color: #fff; font-size: 22px; cursor: pointer;
     user-select: none; -webkit-user-select: none; touch-action: none;
     -webkit-tap-highlight-color: transparent; outline: none;
     display: flex; align-items: center; justify-content: center;
     transition: background 0.08s, transform 0.08s; font-family: serif;
   }
   .mc-btn:active { background: rgba(255,255,255,0.32); transform: scale(0.91); }
-  .mc-dir  { font-size: 26px; }
-  .mc-jump { background: rgba(64,128,255,0.18); border-color: rgba(100,160,255,0.45); font-size: 26px; }
+  .mc-jump { background: rgba(64,128,255,0.18); border-color: rgba(100,160,255,0.45); font-size: 28px; }
   .mc-atk  { background: rgba(255,200,0,0.18);  border-color: rgba(255,200,0,0.45);  }
   .mc-gun  { background: rgba(200,200,255,0.12); border-color: rgba(200,200,255,0.3); font-size: 18px; }
   .mc-fire { background: rgba(255,100,0,0.18);   border-color: rgba(255,120,0,0.45);  font-size: 18px; }
-  .mc-shop { width: 44px; height: 44px; font-size: 18px; font-family: serif;
+  .mc-shop { width: 48px; height: 48px; font-size: 20px; font-family: serif;
              background: rgba(255,215,0,0.15); border-color: rgba(255,215,0,0.35); }
+  /* Joystick */
+  #joystick-ring {
+    width: 108px; height: 108px; border-radius: 50%;
+    background: rgba(255,255,255,0.07); border: 2.5px solid rgba(255,255,255,0.22);
+    position: relative; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #joystick-dot {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: rgba(255,255,255,0.25); border: 2px solid rgba(255,255,255,0.55);
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%); pointer-events: none;
+    transition: box-shadow 0.1s;
+  }
+  #joystick-ring:active #joystick-dot,
+  #joystick-ring.active #joystick-dot { box-shadow: 0 0 14px rgba(255,255,255,0.45); }
 </style>
 </head>
 <body>
@@ -101,8 +116,7 @@
 
 <div id="mobile-controls">
   <div id="mc-left">
-    <button class="mc-btn mc-dir" ontouchstart="mcDown('ArrowLeft')"  ontouchend="mcUp('ArrowLeft')"  onmousedown="mcDown('ArrowLeft')"  onmouseup="mcUp('ArrowLeft')">◀</button>
-    <button class="mc-btn mc-dir" ontouchstart="mcDown('ArrowRight')" ontouchend="mcUp('ArrowRight')" onmousedown="mcDown('ArrowRight')" onmouseup="mcUp('ArrowRight')">▶</button>
+    <div id="joystick-ring"><div id="joystick-dot"></div></div>
   </div>
   <div id="mc-mid">
     <button class="mc-btn mc-shop" ontouchstart="mcShop()" onmousedown="mcShop()">🛒</button>
@@ -142,7 +156,7 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 let GROUND = H - 60;
-let gameZoom = 1;
+let gameZoomX = 1, gameZoomY = 1;
 const SKY_THRESHOLD = -350; // world-y below this = Sky Kingdom
 const SKY_BIOME = { name:'Sky Kingdom', sky0:[135,206,250], sky1:[255,255,255], gnd:[200,230,255], gndA:[255,255,255], plt:[220,240,255], pltA:[255,255,255], bg:[170,220,255], bgA:0.25 };
 
@@ -403,11 +417,11 @@ function update(s) {
   }
 
   if(h.x<s.camera+60) h.x=s.camera+60;
-  s.camera+=(h.x-(W/gameZoom)*0.3-s.camera)*0.08;
-  const targetCY=h.y+h.h/2-H/(gameZoom*2);
-  s.cameraY+=(Math.max(0,targetCY)-s.cameraY)*0.1;
+  s.camera+=(h.x-(W/gameZoomX)*0.3-s.camera)*0.08;
+  const targetCY=h.y+h.h/2-(H/gameZoomY)*0.45;
+  s.cameraY+=(targetCY-s.cameraY)*0.1;
   s.distance=Math.max(s.distance,Math.floor(h.x/10));
-  if(s.worldX<s.camera+W/gameZoom+400){generateChunk(s,s.worldX);s.worldX+=800;}
+  if(s.worldX<s.camera+W/gameZoomX+400){generateChunk(s,s.worldX);s.worldX+=800;}
   const wasInSky=s.inSkyKingdom;
   s.inSkyKingdom=h.y<SKY_THRESHOLD;
   if(s.inSkyKingdom&&!wasInSky) s.skyAlert=240;
@@ -423,7 +437,7 @@ function update(s) {
   s.platforms=s.platforms.filter(p=>p.x+p.w>cullX);
   s.coins=s.coins.filter(c=>c.x>cullX);
   s.enemies=s.enemies.filter(e=>e.x+e.w>cullX&&!e.dead);
-  projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoom+100);
+  projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoomX+100);
 
   if(h.attackTimer>0) h.attackTimer--;
   if(h.attackCooldown>0) h.attackCooldown--;
@@ -629,7 +643,7 @@ function spawnParticles(s,x,y,color,count){
 function draw(s){
   ctx.clearRect(0,0,W,H);
   ctx.save();
-  ctx.scale(gameZoom,gameZoom);
+  ctx.scale(gameZoomX,gameZoomY);
   ctx.translate(-s.camera,-s.cameraY);
   const bm=getBiome(s.distance);
   drawBackground(s,bm);
@@ -644,7 +658,7 @@ function draw(s){
 }
 
 function drawBackground(s,bm){
-  const VW=W/gameZoom,VH=H/gameZoom;
+  const VW=W/gameZoomX,VH=H/gameZoomY;
   const cy=s.cameraY||0;
   // Blend toward Sky Kingdom as hero flies higher
   const skyBlend=Math.max(0,Math.min(1,(-s.hero.y-100)/300));
@@ -687,7 +701,7 @@ function drawBackground(s,bm){
 
 function drawPlatforms(s,bm){
   for(const p of s.platforms){
-    if(p.x+p.w<s.camera-10||p.x>s.camera+W/gameZoom+10) continue;
+    if(p.x+p.w<s.camera-10||p.x>s.camera+W/gameZoomX+10) continue;
     if(p.type==='cloud'){
       ctx.save();ctx.globalAlpha=0.93;
       ctx.fillStyle='rgba(235,248,255,1)';
@@ -712,7 +726,7 @@ function drawPlatforms(s,bm){
 
 function drawCoins(s){
   s.coins.forEach(c=>{
-    if(c.x<s.camera-20||c.x>s.camera+W/gameZoom+20) return;
+    if(c.x<s.camera-20||c.x>s.camera+W/gameZoomX+20) return;
     const pulse=0.8+0.2*Math.sin(s.frameCount*0.1+c.x*0.01);
     ctx.fillStyle=`rgba(255,215,0,${pulse})`;
     ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2*pulse,0,Math.PI*2);ctx.fill();
@@ -833,7 +847,7 @@ function drawHero(s){
 
 function drawEnemies(s){
   for(const e of s.enemies){
-    if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W/gameZoom+10) continue;
+    if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W/gameZoomX+10) continue;
     if(e.type==='angel'){
       const flash=e.hitTimer>0;
       ctx.save();
@@ -1094,11 +1108,86 @@ document.getElementById('mobile-controls').addEventListener('touchend',   e=>e.p
 canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
 canvas.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
 
+// ---- Joystick ----
+const jRing = document.getElementById('joystick-ring');
+const jDot  = document.getElementById('joystick-dot');
+let jTouchId = null, jCenterX = 0, jCenterY = 0;
+const J_RADIUS = 32; // max dot travel in CSS px
+const J_DEAD   = 9;  // dead zone
+
+function jSetKeys(dx){
+  if(state){
+    state.keys['ArrowLeft']  = dx < -J_DEAD;
+    state.keys['ArrowRight'] = dx >  J_DEAD;
+  }
+}
+function jMoveDot(cx, cy){
+  const dx = cx - jCenterX, dy = cy - jCenterY;
+  const dist = Math.sqrt(dx*dx+dy*dy);
+  const r = Math.min(dist, J_RADIUS);
+  const ang = Math.atan2(dy, dx);
+  const ox = Math.cos(ang)*r, oy = Math.sin(ang)*r;
+  jDot.style.transform = `translate(calc(-50% + ${ox}px), calc(-50% + ${oy}px))`;
+  jSetKeys(dx);
+}
+function jGetCenter(){
+  const rect = jRing.getBoundingClientRect();
+  return { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+}
+jRing.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  jTouchId = t.identifier;
+  const c = jGetCenter(); jCenterX=c.x; jCenterY=c.y;
+  jRing.classList.add('active');
+  jMoveDot(t.clientX, t.clientY);
+},{passive:false});
+jRing.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    if(t.identifier===jTouchId) jMoveDot(t.clientX,t.clientY);
+  }
+},{passive:false});
+function jRelease(e){
+  e.preventDefault();
+  jTouchId=null;
+  jDot.style.transform='translate(-50%,-50%)';
+  jRing.classList.remove('active');
+  if(state){ state.keys['ArrowLeft']=false; state.keys['ArrowRight']=false; }
+}
+jRing.addEventListener('touchend',    jRelease,{passive:false});
+jRing.addEventListener('touchcancel', jRelease,{passive:false});
+
 // ---- Responsive scaling ----
 function resizeGame(){
-  const vw = Math.min(window.innerWidth, W);
-  const newZoom = Math.max(1, W / vw);
-  const newGROUND = Math.floor(H / newZoom - 50);
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const cH = document.getElementById('mobile-controls').offsetHeight || 88;
+  const uiH = document.getElementById('scale-wrapper').offsetHeight || 28;
+  const availH = Math.max(120, vh - cH - uiH);
+
+  // On mobile: stretch canvas to fill ALL available space (non-uniform zoom keeps world proportional)
+  // On desktop: maintain 800:440 aspect ratio
+  let cssW, cssH;
+  if(vw <= W) {
+    // Mobile: fill width and available height
+    cssW = vw;
+    cssH = availH;
+  } else {
+    // Desktop: maintain aspect ratio, fit within window
+    cssW = Math.min(vw, W);
+    cssH = Math.round(cssW * H / W);
+    if(cssH > availH) { cssH = availH; cssW = Math.round(cssH * W / H); }
+  }
+
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+
+  // Non-uniform zoom: each world unit = 1 CSS pixel (correct proportions in both axes)
+  const newZX = W / cssW;   // gameZoomX: > 1 on narrow phones (zooms in horizontally)
+  const newZY = H / cssH;   // gameZoomY: < 1 on tall phones (zooms out vertically, revealing more sky)
+  const newGROUND = Math.floor(H / newZY - 50);
+
   if(state && newGROUND !== GROUND){
     const delta = newGROUND - GROUND;
     state.hero.y += delta;
@@ -1107,7 +1196,8 @@ function resizeGame(){
     for(const e of state.enemies) e.y += delta;
     for(const p of projectiles) p.y += delta;
   }
-  gameZoom = newZoom;
+  gameZoomX = newZX;
+  gameZoomY = newZY;
   GROUND = newGROUND;
 }
 window.addEventListener('resize', resizeGame);
