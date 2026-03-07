@@ -239,10 +239,11 @@ const GUN_CD      = [0, 38, 30, 24, 20, 16];
 const FB_DMG      = [0, 8, 12, 18, 25, 34];
 const FB_RADIUS   = [0, 55, 72, 92, 112, 135];
 const FB_CD       = [0, 100, 85, 68, 52, 38];
-const JP_FUEL  = [0, 150, 250, 380, 540, 750];
-const JP_THRUST= [0, 0.35, 0.40, 0.45, 0.50, 0.55];
-const JP_VMAX  = [0, 5, 6, 7, 8, 9];
-const JP_REGEN = [0, 1.5, 2.0, 2.5, 3.0, 3.5];
+const JP_FUEL  = [0, 90,  150, 230, 340, 500];
+const JP_THRUST= [0, 1.5, 2.0, 2.8, 3.8, 5.0];
+const JP_VMAX  = [0, 16,  22,  29,  37,  46 ];   // all >> jump speed (~10.5) — jetpack clearly wins
+const JP_REGEN = [0, 1.0, 1.5, 2.0, 2.8, 4.0];
+const SKY_X_THRESHOLD = 8000; // distance before sky enemies go ultra-hard
 
 // ---- Shop consumables ----
 const SHOP_ITEMS = [
@@ -346,14 +347,29 @@ function generateSkyChunk(s, fromX) {
   for(let i=0;i<n;i++){
     const x=fromX+50+Math.random()*550, y=SKY_THRESHOLD-50-Math.random()*220, w=90+Math.random()*140;
     s.platforms.push({x,y,w,h:22,type:'cloud'});
+    const coinVal = s.distance >= SKY_X_THRESHOLD ? 25 : 3;
     for(let j=0;j<2+Math.floor(Math.random()*3);j++)
-      s.coins.push({x:x+j*30+Math.random()*10,y:y-22,w:16,h:16,val:3,collected:false});
+      s.coins.push({x:x+j*30+Math.random()*10,y:y-22,w:16,h:16,val:coinVal,collected:false});
   }
-  if(Math.random()<0.8){
+  if(Math.random()<0.85){
     const ex=fromX+50+Math.random()*500, ey=SKY_THRESHOLD-60-Math.random()*180;
-    s.enemies.push({x:ex,y:ey,w:28,h:28,vx:0,vy:0,onGround:false,facing:-1,
-      type:'angel',tier:2,dead:false,hitTimer:0,animFrame:0,animTimer:0,
-      hp:6,maxHp:6,atk:2,speed:1.8,xpVal:25,color:'#ffffcc',flySine:Math.random()*Math.PI*2});
+    // Enemy difficulty scales with horizontal distance:
+    // < 4000m  → weak patrol angels
+    // 4000–8000 → elite angels
+    // ≥ 8000m  → ULTRA — defense 999, need 1000+ atk to deal any damage
+    const isUltra = s.distance >= SKY_X_THRESHOLD;
+    const isElite = s.distance >= 4000;
+    const hp    = isUltra ? 200000 : isElite ? 8000  : 300;
+    const atk   = isUltra ? 120    : isElite ? 25    : 6;
+    const def   = isUltra ? 999    : isElite ? 80    : 0;
+    const spd   = isUltra ? 2.8    : isElite ? 2.2   : 1.6;
+    const xpVal = isUltra ? 2000   : isElite ? 200   : 30;
+    const color = isUltra ? '#ff4444' : isElite ? '#ff9900' : '#ffffcc';
+    const sz    = isUltra ? 40 : isElite ? 34 : 28;
+    s.enemies.push({x:ex,y:ey,w:sz,h:sz,vx:0,vy:0,onGround:false,facing:-1,
+      type:'angel',tier:isUltra?3:isElite?2:1,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+      hp,maxHp:hp,atk,speed:spd,xpVal,color,defense:def,
+      flySine:Math.random()*Math.PI*2,isUltra,isElite});
   }
 }
 
@@ -559,13 +575,23 @@ function explodeFireball(s,p){
 }
 
 function damageEnemy(s,e,dmg){
-  e.hp-=dmg; e.hitTimer=12;
+  const eDef = e.defense || 0;
+  const actual = Math.max(0, dmg - eDef);
+  e.hitTimer = 12;
+  if(actual <= 0){
+    // Immune — blue shield sparks
+    spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#44aaff',5);
+    spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffffff',3);
+    return;
+  }
+  e.hp -= actual;
   spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff4444',5);
   if(e.hp<=0){
     e.dead=true; gainXP(s,e.xpVal);
     spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffaa00',12);
+    const coinVal = eDef>=999 ? 50 : 1; // ultra angels drop huge coin stacks
     const drops=Math.floor(e.xpVal/4);
-    for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:1,collected:false});
+    for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:coinVal,collected:false});
   }
 }
 
@@ -850,22 +876,58 @@ function drawEnemies(s){
     if(e.dead||e.x+e.w<s.camera-10||e.x>s.camera+W/gameZoomX+10) continue;
     if(e.type==='angel'){
       const flash=e.hitTimer>0;
+      const ultra=e.isUltra, elite=e.isElite;
       ctx.save();
       ctx.translate(e.x+e.w/2,e.y+e.h/2);
       if(e.facing===-1) ctx.scale(-1,1);
-      ctx.globalAlpha=0.22+0.1*Math.sin(s.frameCount*0.1);
-      ctx.fillStyle='#ffffaa';ctx.beginPath();ctx.arc(0,0,e.w/2+10,0,Math.PI*2);ctx.fill();
-      ctx.globalAlpha=1;
-      ctx.fillStyle=flash?'#fff':'rgba(200,230,255,0.88)';
-      ctx.beginPath();ctx.ellipse(-e.w*0.85,0,e.w*0.52,e.h*0.24,0.2,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.ellipse( e.w*0.85,0,e.w*0.52,e.h*0.24,-0.2,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=flash?'#fff':'#ffffd8';ctx.beginPath();ctx.arc(0,0,e.w/2,0,Math.PI*2);ctx.fill();
-      ctx.strokeStyle='#ffd700';ctx.lineWidth=2;
-      ctx.beginPath();ctx.ellipse(0,-e.h/2-5,8,3,0,0,Math.PI*2);ctx.stroke();
-      ctx.fillStyle='#5555ff';ctx.beginPath();ctx.arc(3,-2,3,0,Math.PI*2);ctx.fill();
+      // Aura
+      if(ultra){
+        // Pulsing crimson aura + dark corona
+        ctx.globalAlpha=0.35+0.2*Math.sin(s.frameCount*0.18);
+        ctx.fillStyle='#cc0000';
+        ctx.beginPath();ctx.arc(0,0,e.w/2+22,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=0.18+0.1*Math.sin(s.frameCount*0.08);
+        ctx.fillStyle='#000000';
+        ctx.beginPath();ctx.arc(0,0,e.w/2+32,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      } else if(elite){
+        ctx.globalAlpha=0.28+0.12*Math.sin(s.frameCount*0.12);
+        ctx.fillStyle='#ff7700';
+        ctx.beginPath();ctx.arc(0,0,e.w/2+14,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      } else {
+        ctx.globalAlpha=0.22+0.1*Math.sin(s.frameCount*0.1);
+        ctx.fillStyle='#ffffaa';ctx.beginPath();ctx.arc(0,0,e.w/2+10,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      }
+      // Wings
+      const wingColor = ultra?(flash?'#fff':'rgba(180,0,0,0.9)'):elite?(flash?'#fff':'rgba(255,140,0,0.85)'):(flash?'#fff':'rgba(200,230,255,0.88)');
+      ctx.fillStyle=wingColor;
+      ctx.beginPath();ctx.ellipse(-e.w*0.9,0,e.w*0.58,e.h*0.26,ultra?0.4:0.2,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse( e.w*0.9,0,e.w*0.58,e.h*0.26,ultra?-0.4:-0.2,0,Math.PI*2);ctx.fill();
+      // Body
+      const bodyColor = ultra?(flash?'#fff':'#330000'):elite?(flash?'#fff':'#331100'):(flash?'#fff':'#ffffd8');
+      ctx.fillStyle=bodyColor;ctx.beginPath();ctx.arc(0,0,e.w/2,0,Math.PI*2);ctx.fill();
+      // Halo (ultra = inverted dark halo)
+      ctx.strokeStyle=ultra?'#ff2200':elite?'#ff9900':'#ffd700';
+      ctx.lineWidth=ultra?3:2;
+      ctx.beginPath();ctx.ellipse(0,-e.h/2-5,ultra?12:8,ultra?5:3,0,0,Math.PI*2);ctx.stroke();
+      // Eye (ultra = glowing red)
+      ctx.fillStyle=ultra?'#ff0000':elite?'#ff6600':'#5555ff';
+      ctx.beginPath();ctx.arc(3,-2,ultra?5:3,0,Math.PI*2);ctx.fill();
+      if(ultra){ ctx.fillStyle='#ffffff'; ctx.beginPath();ctx.arc(4,-3,2,0,Math.PI*2);ctx.fill(); }
       ctx.restore();
-      ctx.fillStyle='#333';ctx.fillRect(e.x-2,e.y-10,e.w+4,4);
-      ctx.fillStyle='#ffe000';ctx.fillRect(e.x-2,e.y-10,(e.w+4)*(e.hp/e.maxHp),4);
+      // HP bar
+      const hbW=e.w+4+(ultra?16:elite?8:0);
+      ctx.fillStyle='#333';ctx.fillRect(e.x-2-(ultra?8:elite?4:0),e.y-12,hbW,5);
+      ctx.fillStyle=ultra?'#ff2200':elite?'#ff8800':'#ffe000';
+      ctx.fillRect(e.x-2-(ultra?8:elite?4:0),e.y-12,hbW*(e.hp/e.maxHp),5);
+      // "IMMUNE" badge if ultra and recently hit
+      if(ultra&&e.hitTimer>0&&(e.defense||0)>=999){
+        ctx.font='bold 9px monospace';ctx.textAlign='center';
+        ctx.fillStyle='#ff4444';ctx.fillText('IMMUNE',e.x+e.w/2,e.y-16);
+        ctx.textAlign='left';
+      }
       continue;
     }
     const tier=e.tier||0;
