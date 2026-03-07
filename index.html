@@ -19,10 +19,10 @@
   .overlay.show { display: flex; }
   #upgrade-screen h2 { font-size: 28px; margin-bottom: 8px; color: #ffd700; }
   #upgrade-screen > p { margin-bottom: 24px; color: #aaa; }
-  .upgrade-cards { display: flex; gap: 16px; }
+  .upgrade-cards { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; padding: 0 12px; }
   .upgrade-card {
     background: #1a1a2e; border: 2px solid #444; border-radius: 8px;
-    padding: 20px; width: 180px; cursor: pointer; text-align: center;
+    padding: 16px 12px; width: 140px; flex: 0 0 auto; cursor: pointer; text-align: center;
     transition: border-color 0.2s, transform 0.1s;
   }
   .upgrade-card:hover { border-color: #ffd700; transform: scale(1.05); }
@@ -435,7 +435,10 @@ function update(s) {
   if(h.x<s.camera+60) h.x=s.camera+60;
   s.camera+=(h.x-(W/gameZoomX)*0.3-s.camera)*0.08;
   const targetCY=h.y+h.h/2-(H/gameZoomY)*0.45;
-  s.cameraY+=(targetCY-s.cameraY)*0.1;
+  // Dynamic vertical lerp: faster tracking when hero moves fast (jetpack/falling),
+  // prevents hero flying off top/bottom of screen at high JP_VMAX speeds.
+  const vertLerp=Math.min(0.92,0.1+Math.abs(h.vy)*0.018);
+  s.cameraY+=(targetCY-s.cameraY)*vertLerp;
   s.distance=Math.max(s.distance,Math.floor(h.x/10));
   if(s.worldX<s.camera+W/gameZoomX+400){generateChunk(s,s.worldX);s.worldX+=800;}
   const wasInSky=s.inSkyKingdom;
@@ -623,7 +626,8 @@ function updateEnemy(s,e){
   if(e.type==='angel'){
     e.flySine=(e.flySine||0)+0.04;
     e.y+=Math.sin(e.flySine)*0.8;
-    if(aggro){e.vx=dir*e.speed;e.x+=e.vx;e.facing=dir;
+    const angelAggro=absDist<320;
+    if(angelAggro){e.vx=dir*e.speed;e.x+=e.vx;e.facing=dir;
       if(absDist<36&&Math.abs(h.y-e.y)<e.h+20&&h.invTimer<=0) heroHit(s,e.atk);}
     return;
   }
