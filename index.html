@@ -2,14 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Forward Platformer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: monospace; overflow: hidden; }
-  canvas { border: 2px solid #333; display: block; }
+  body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; font-family: monospace; overflow: hidden; }
+  #scale-wrapper { transform-origin: top center; flex-shrink: 0; }
+  canvas { border: 2px solid #333; display: block; touch-action: none; }
   #ui { color: #fff; font-size: 13px; width: 800px; display: flex; justify-content: space-between; padding: 4px 8px; background: #111; }
   .overlay {
-    display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.9); color: #fff; flex-direction: column;
     align-items: center; justify-content: flex-start; z-index: 10;
     overflow-y: auto; padding: 18px 0 12px;
@@ -52,20 +54,66 @@
   #shop-close { margin-top: 12px; padding: 7px 22px; background: #333; border: 1px solid #666; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; font-family: monospace; flex-shrink: 0; }
   #shop-close:hover { background: #555; }
 
-  #gameover { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  #gameover { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
     background: #111; border: 2px solid #e55; padding: 32px 48px; border-radius: 12px;
     text-align: center; color: #fff; z-index: 20; }
   #gameover h2 { color: #e55; font-size: 32px; margin-bottom: 12px; }
   #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; font-family: monospace; }
+
+  /* ---- Mobile Controls ---- */
+  #mobile-controls {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; max-width: 100vw; flex-shrink: 0;
+    padding: 8px 14px; padding-bottom: max(8px, env(safe-area-inset-bottom));
+    background: rgba(0,0,0,0.35); gap: 0;
+  }
+  #mc-left { display: flex; gap: 8px; align-items: center; }
+  #mc-mid  { display: flex; align-items: center; justify-content: center; }
+  #mc-right { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .mc-btn {
+    width: 56px; height: 56px;
+    background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.22);
+    border-radius: 12px; color: #fff; font-size: 22px; cursor: pointer;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+    -webkit-tap-highlight-color: transparent; outline: none;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.08s, transform 0.08s; font-family: serif;
+  }
+  .mc-btn:active { background: rgba(255,255,255,0.32); transform: scale(0.91); }
+  .mc-dir  { font-size: 26px; }
+  .mc-jump { background: rgba(64,128,255,0.18); border-color: rgba(100,160,255,0.45); font-size: 26px; }
+  .mc-atk  { background: rgba(255,200,0,0.18);  border-color: rgba(255,200,0,0.45);  }
+  .mc-gun  { background: rgba(200,200,255,0.12); border-color: rgba(200,200,255,0.3); font-size: 18px; }
+  .mc-fire { background: rgba(255,100,0,0.18);   border-color: rgba(255,120,0,0.45);  font-size: 18px; }
+  .mc-shop { width: 44px; height: 44px; font-size: 18px; font-family: serif;
+             background: rgba(255,215,0,0.15); border-color: rgba(255,215,0,0.35); }
 </style>
 </head>
 <body>
+<div id="scale-wrapper">
 <div id="ui">
   <span>LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
   <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0</span>m &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
   <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span> &nbsp;<span style="color:#aaa">[B]Shop</span></span>
 </div>
 <canvas id="c" width="800" height="440"></canvas>
+</div>
+
+<div id="mobile-controls">
+  <div id="mc-left">
+    <button class="mc-btn mc-dir" ontouchstart="mcDown('ArrowLeft')"  ontouchend="mcUp('ArrowLeft')"  onmousedown="mcDown('ArrowLeft')"  onmouseup="mcUp('ArrowLeft')">◀</button>
+    <button class="mc-btn mc-dir" ontouchstart="mcDown('ArrowRight')" ontouchend="mcUp('ArrowRight')" onmousedown="mcDown('ArrowRight')" onmouseup="mcUp('ArrowRight')">▶</button>
+  </div>
+  <div id="mc-mid">
+    <button class="mc-btn mc-shop" ontouchstart="mcShop()" onmousedown="mcShop()">🛒</button>
+  </div>
+  <div id="mc-right">
+    <button class="mc-btn mc-jump" ontouchstart="mcDown(' ')"  ontouchend="mcUp(' ')"  onmousedown="mcDown(' ')"  onmouseup="mcUp(' ')">↑</button>
+    <button class="mc-btn mc-atk"  ontouchstart="mcDown('z')"  ontouchend="mcUp('z')"  onmousedown="mcDown('z')"  onmouseup="mcUp('z')">⚔</button>
+    <button class="mc-btn mc-gun"  ontouchstart="mcDown('c')"  ontouchend="mcUp('c')"  onmousedown="mcDown('c')"  onmouseup="mcUp('c')">🔫</button>
+    <button class="mc-btn mc-fire" ontouchstart="mcDown('v')"  ontouchend="mcUp('v')"  onmousedown="mcDown('v')"  onmouseup="mcUp('v')">🔥</button>
+  </div>
+</div>
 
 <div id="upgrade-screen" class="overlay">
   <h2>LEVEL UP!</h2>
@@ -883,8 +931,36 @@ window.addEventListener('keydown',e=>{
 window.addEventListener('keyup',e=>{if(state) state.keys[e.key]=false;});
 
 function loop(){update(state);draw(state);requestAnimationFrame(loop);}
+
+// ---- Mobile input ----
+function mcDown(key){ if(state) state.keys[key]=true; }
+function mcUp(key)  { if(state) state.keys[key]=false; }
+function mcShop()   { if(state&&!state.dead){ state.shopOpen?closeShop():openShop(); } }
+
+// Prevent scrolling/zooming on touch
+document.getElementById('mobile-controls').addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+document.getElementById('mobile-controls').addEventListener('touchend',   e=>e.preventDefault(), {passive:false});
+canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+canvas.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
+
+// ---- Responsive scaling ----
+function resizeGame(){
+  const wrapper  = document.getElementById('scale-wrapper');
+  const controls = document.getElementById('mobile-controls');
+  const gameW=800, gameH=472;
+  const cH = controls.offsetHeight||0;
+  const scale = Math.min(1, window.innerWidth/gameW, (window.innerHeight-cH)/gameH);
+  wrapper.style.width  = gameW+'px';
+  wrapper.style.height = gameH+'px';
+  wrapper.style.transform = `scale(${scale})`;
+  // collapse the dead space left by CSS transform (which doesn't affect layout)
+  wrapper.style.marginBottom = `-${Math.round(gameH*(1-scale))}px`;
+}
+window.addEventListener('resize', resizeGame);
+
 restartGame();
 loop();
+resizeGame();
 </script>
 </body>
 </html>
