@@ -252,12 +252,6 @@ const WEAPON_DEFS = {
     descs: ['AOE blast, 8 dmg','Bigger radius, 12 dmg','More damage, 18 dmg','Leaves fire, 25 dmg','Massive AOE, 34 dmg'],
     cost: lvl => Math.round(65 * Math.pow(1.7, lvl)),
   },
-  jetpack: {
-    icon:'🚀', name:'JetPack', key:'[J hold]', baseCost:200,
-    maxLevel:5,
-    descs:['Basic thruster — very limited fuel','More thrust, still short-range','Lv.3: Sky Kingdom within reach!','High-altitude cruiser, long fuel','⭐ Legendary! Master of the skies!'],
-    cost: lvl => Math.round(200 * Math.pow(2.0, lvl)),
-  },
   orbs: {
     icon:'🔮', name:'Orb Shield', key:'[passive]', baseCost:120,
     maxLevel:5,
@@ -273,10 +267,6 @@ const GUN_CD      = [0, 38, 30, 24, 20, 16];
 const FB_DMG      = [0, 8, 12, 18, 25, 34];
 const FB_RADIUS   = [0, 55, 72, 92, 112, 135];
 const FB_CD       = [0, 100, 85, 68, 52, 38];
-const JP_FUEL  = [0, 32,  58,  110, 200, 340];  // Lv1-2: can't reach sky; Lv3+: can
-const JP_THRUST= [0, 1.1, 1.4, 2.0, 2.8, 4.0];
-const JP_VMAX  = [0, 8,   11,  16,  26,  40 ];
-const JP_REGEN = [0, 0.4, 0.7, 1.2, 2.0, 3.5];
 const SKY_X_THRESHOLD = 8000; // distance before sky enemies go ultra-hard
 
 // ---- Weapon mode collectibles ----
@@ -298,7 +288,6 @@ const SHOP_ITEMS = [
   { icon:'🧃', name:'Small Potion',  desc:'Restore 2 HP',                cost: 8,  apply:h=>{ h.hp=Math.min(h.hp+2,h.maxHp); }},
   { icon:'🧪', name:'Medium Potion', desc:'Restore 5 HP',                 cost:18,  apply:h=>{ h.hp=Math.min(h.hp+5,h.maxHp); }},
   { icon:'💊', name:'Large Potion',  desc:'Restore 50% Max HP',           cost:35,  apply:h=>{ h.hp=Math.min(h.hp+Math.ceil(h.maxHp*0.5),h.maxHp); }},
-  { icon:'⛽', name:'Jet Fuel',      desc:'Refills jetpack fuel instantly',cost:20,  apply:h=>{ const l=h.weapons.jetpack.level; if(l>0)h.jetpackFuel=JP_FUEL[l]; }},
   { icon:'🦘', name:'Jump Springs',  desc:'+2 Jump for 20 seconds',       cost:22,  apply:h=>{ h._jumpSpringTimer=1200; }},
   { icon:'🛡️', name:'Energy Shield', desc:'Negate the next hit taken',    cost:28,  apply:h=>{ h._shield=true; }},
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
@@ -337,16 +326,18 @@ function createState() {
       hp:5, maxHp:5,
       lvl:1, xp:0, xpNext:20,
       atkPow:1, defense:0, jumpPow:1, speed:1,
-      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, jetpack:{level:0}, orbs:{level:0} },
-      gunCooldown:0, fireballCooldown:0, jetpackFuel:0, jetting:false,
+      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, orbs:{level:0} },
+      gunCooldown:0, fireballCooldown:0,
+      _wings:false, _wingsActive:false, _wingsTime:0,
       _jumpSpringTimer:0, _shield:false, _speedBootCount:0, _hasteMult:1, _vampirism:false,
       _doubleJump:false, _tripleJump:false, _jumpsUsed:0, _jumpWasDown:false,
-      _weaponPath:null, _gunMode:null, _swordMode:null,
+      _weaponPath:null, _gunMode:null, _swordMode:null, _poison:null,
     },
     platforms:[], coins:[], enemies:[], particles:[], powerups:[],
     worldX:0, keys:{}, frameCount:0,
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
     reachedSkyKingdom:false, _coinMult:1, _popups:[],
+    bossSpawned:false, diamonds:[],
   };
 }
 
@@ -498,23 +489,20 @@ function update(s) {
     h.vy=-(power); h.onGround=false; h._jumpsUsed++;
     if(h._jumpsUsed>1) spawnParticles(s,h.x+h.w/2,h.y+h.h,'#aaddff',5);
   }
-  const jpLvl=h.weapons.jetpack.level;
-  if(jpLvl>0){
-    if(jetKey&&h.jetpackFuel>0){
-      h.vy=Math.max(h.vy-JP_THRUST[jpLvl],-JP_VMAX[jpLvl]);
-      h.jetpackFuel=Math.max(0,h.jetpackFuel-1);
-      h.jetting=true;
-      if(h.onGround){h.onGround=false;}
-    } else {
-      h.jetting=false;
-      const regen=h.onGround?JP_REGEN[jpLvl]*3:JP_REGEN[jpLvl]*0.3;
-      h.jetpackFuel=Math.min(JP_FUEL[jpLvl],h.jetpackFuel+regen);
+  // Wings (one-use flight to Sky Kingdom — dropped by Dragon Boss)
+  if(jetKey && h._wings && !h._wingsActive){
+    h._wings=false; h._wingsActive=true; h._wingsTime=220;
+  }
+  if(h._wingsActive){
+    h._wingsTime--;
+    if(h._wingsTime<=0||h.y<SKY_THRESHOLD) h._wingsActive=false;
+    h.vy=Math.max(h.vy-1.8,-20);
+    h.onGround=false;
+    if(s.frameCount%3===0){
+      spawnParticles(s,h.x+h.w/2-8,h.y+h.h,'#ffffff',2);
+      spawnParticles(s,h.x+h.w/2+8,h.y+h.h,'#e0e8ff',2);
     }
-    if(h.jetting&&s.frameCount%3===0){
-      spawnParticles(s,h.x+h.w*0.35,h.y+h.h,'#ff4400',2);
-      spawnParticles(s,h.x+h.w*0.65,h.y+h.h,'#ff4400',2);
-    }
-  } else { h.jetting=false; }
+  }
 
   const swordLvl=h.weapons.sword.level;
   const hm=h._hasteMult||1;
@@ -588,6 +576,7 @@ function update(s) {
   s.coins=s.coins.filter(c=>c.x>cullX);
   s.enemies=s.enemies.filter(e=>e.x+e.w>cullX&&!e.dead);
   s.powerups=s.powerups.filter(pu=>pu.x>cullX);
+  s.diamonds=s.diamonds.filter(d=>d.x>cullX);
   projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoomX+100);
 
   if(h.attackTimer>0) h.attackTimer--;
@@ -1164,24 +1153,24 @@ function drawHero(s){
   ctx.fillStyle='#333';ctx.fillRect(bx,by,barW,barH);
   ctx.fillStyle=h.hp>h.maxHp*0.4?'#44ee44':'#ee4444';
   ctx.fillRect(bx,by,barW*(h.hp/h.maxHp),barH);
-  // Jetpack
-  const jpLvl2=h.weapons.jetpack.level;
-  if(jpLvl2>0){
-    if(h.jetting){
-      ctx.globalAlpha=0.65+0.35*Math.random();
-      ctx.fillStyle='#ff5500';
-      ctx.beginPath();ctx.arc(h.x+h.w*0.33,h.y+h.h+10,5+jpLvl2*1.5,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(h.x+h.w*0.67,h.y+h.h+10,5+jpLvl2*1.5,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#ffcc00';
-      ctx.beginPath();ctx.arc(h.x+h.w*0.33,h.y+h.h+5,2+jpLvl2,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(h.x+h.w*0.67,h.y+h.h+5,2+jpLvl2,0,Math.PI*2);ctx.fill();
-      ctx.globalAlpha=1;
-    }
-    const fuelPct=h.jetpackFuel/JP_FUEL[jpLvl2];
-    const fbX=h.x+h.w/2-barW/2,fbY=h.y-20;
-    ctx.fillStyle='#222';ctx.fillRect(fbX,fbY,barW,barH);
-    ctx.fillStyle=fuelPct>0.3?'#00aaff':'#ff6600';
-    ctx.fillRect(fbX,fbY,barW*Math.max(0,fuelPct),barH);
+  // Wings flight effect
+  if(h._wingsActive){
+    ctx.save();
+    ctx.globalAlpha=0.6+0.4*Math.sin(s.frameCount*0.3);
+    // Wing shapes on back
+    ctx.fillStyle='#e8f4ff';
+    ctx.beginPath();ctx.ellipse(h.x+h.w/2-14,h.y+h.h/2,8,22,0.4,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(h.x+h.w/2+14,h.y+h.h/2,8,22,-0.4,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=0.9;ctx.fillStyle='#ffffff';
+    ctx.beginPath();ctx.ellipse(h.x+h.w/2-12,h.y+h.h/2-4,5,14,0.3,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(h.x+h.w/2+12,h.y+h.h/2-4,5,14,-0.3,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;ctx.restore();
+  }
+  // Wings HUD indicator (show if player has wings)
+  if(h._wings){
+    ctx.font='16px serif';ctx.textAlign='center';
+    ctx.fillText('🪽',h.x+h.w/2,h.y-22);
+    ctx.textAlign='left';
   }
   // Shield indicator
   if(h._shield){
