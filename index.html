@@ -331,7 +331,7 @@ function createState() {
     platforms:[], coins:[], enemies:[], particles:[],
     worldX:0, keys:{}, frameCount:0,
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
-    reachedSkyKingdom:false, _coinMult:1,
+    reachedSkyKingdom:false, _coinMult:1, _popups:[],
   };
 }
 
@@ -545,7 +545,13 @@ function update(s) {
   if(h.fireballCooldown>0) h.fireballCooldown--;
 
   for(const c of s.coins){
-    if(!c.collected&&rectOverlap(h,c)){c.collected=true;s.coinCount++;spawnParticles(s,c.x+8,c.y+8,'#ffd700',6);}
+    if(!c.collected&&rectOverlap(h,c)){
+      c.collected=true;
+      const gained=c.val||1;
+      s.coinCount+=gained;
+      spawnParticles(s,c.x+c.w/2,c.y+c.h/2,'#ffd700',gained>1?14:6);
+      if(c.isTreasure) s._popups.push({x:c.x+c.w/2,y:c.y-8,text:'+'+gained+' coins!',life:90,vy:-0.7});
+    }
   }
   s.coins=s.coins.filter(c=>!c.collected);
 
@@ -573,6 +579,8 @@ function update(s) {
 
   for(const p of s.particles){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;}
   s.particles=s.particles.filter(p=>p.life>0);
+  for(const p of s._popups){p.y+=p.vy;p.life--;}
+  s._popups=s._popups.filter(p=>p.life>0);
 
   const bm=getBiome(s.distance);
   document.getElementById('ui-lvl').textContent=h.lvl;
@@ -763,6 +771,7 @@ function draw(s){
   drawHero(s);
   drawProjectiles(s);
   drawParticles(s);
+  drawPopups(s);
   ctx.restore();
   drawHUD(s);
 }
@@ -1140,6 +1149,25 @@ function drawProjectiles(s){
 function drawParticles(s){
   for(const p of s.particles){ctx.globalAlpha=p.life/40;ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,p.size,p.size);}
   ctx.globalAlpha=1;
+}
+
+function drawPopups(s){
+  if(!s._popups.length) return;
+  ctx.textAlign='center';
+  for(const p of s._popups){
+    const t=p.life/90;
+    ctx.globalAlpha=Math.min(1,t*3);
+    const scale=1+0.5*(1-t);
+    ctx.font=`bold ${Math.round(13*scale)}px monospace`;
+    // Drop shadow
+    ctx.fillStyle='rgba(0,0,0,0.7)';
+    ctx.fillText(p.text,p.x+1,p.y+1);
+    // Gold gradient text
+    ctx.fillStyle=t>0.5?'#ffd700':'#ffec7a';
+    ctx.fillText(p.text,p.x,p.y);
+  }
+  ctx.globalAlpha=1;
+  ctx.textAlign='left';
 }
 
 function drawHUD(s){
