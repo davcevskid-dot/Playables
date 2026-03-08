@@ -42,6 +42,8 @@
   .shop-item:hover { border-color: #ffd700; transform: scale(1.05); }
   .shop-item.cant-afford { opacity: 0.42; cursor: not-allowed; }
   .shop-item.cant-afford:hover { transform: none; border-color: #444; }
+  .shop-item.maxed { border-color: #484; opacity: 0.7; cursor: default; }
+  .shop-item.maxed:hover { transform: none; border-color: #484; }
   .shop-item .s-icon { font-size: 26px; margin-bottom: 4px; }
   .shop-item .s-name { font-size: 12px; font-weight: bold; color: #ffd700; margin-bottom: 3px; }
   .shop-item .s-desc { font-size: 10px; color: #bbb; margin-bottom: 6px; min-height: 28px; }
@@ -147,12 +149,13 @@
 <div id="main-menu" class="overlay show">
   <h1>⚔️ FORWARD!</h1>
   <p class="menu-sub">Side-scrolling survival platformer</p>
-  <button class="start-btn" onclick="startGame()">▶ START GAME</button>
+  <button class="start-btn" onclick="startGame(false)">▶ START NEW GAME</button>
+  <button class="start-btn" id="continue-btn" onclick="startGame(true)" style="background:#2255aa;margin-top:8px">↩ CONTINUE</button>
   <div class="controls-info">
     <b>Move:</b> Arrow keys / WASD &nbsp;|&nbsp; <b>Jump:</b> Space / ↑<br>
-    <b>Jetpack:</b> J (separate from jump!) &nbsp;|&nbsp; <b>Attack:</b> Z / X<br>
+    <b>Wings:</b> J (one use! Dropped by Dragon Boss) &nbsp;|&nbsp; <b>Attack:</b> Z / X<br>
     <b>Gun:</b> C &nbsp;|&nbsp; <b>Fireball:</b> V &nbsp;|&nbsp; <b>Shop:</b> B<br><br>
-    <span style="color:#444">Tip: Buy a Jetpack and upgrade it 3 times to reach the Sky Kingdom!</span>
+    <span style="color:#888">Tip: Defeat the Dragon Boss in Biome 15 to get Wings and reach the Sky Kingdom!</span>
   </div>
 </div>
 
@@ -175,7 +178,19 @@
 <div id="gameover">
   <h2>GAME OVER</h2>
   <p id="go-stats"></p>
-  <button onclick="restartGame()">Play Again</button>
+  <p id="go-diamonds" style="color:#cc88ff;font-size:14px;margin:6px 0"></p>
+  <button onclick="openMetaShop()">💎 Meta Shop & Continue</button>
+  <button onclick="startGame(false)" style="background:#553;margin-top:8px;font-size:13px">🔄 New Game (reset all)</button>
+</div>
+
+<div id="meta-shop" class="overlay" style="background:rgba(10,0,20,0.97)">
+  <h2 style="color:#cc88ff;font-size:26px;margin-bottom:4px">💎 Meta Shop</h2>
+  <p id="meta-diamond-count" style="color:#cc88ff;font-size:16px;margin-bottom:10px">Diamonds: 0</p>
+  <div id="meta-items" class="shop-grid" style="max-width:740px"></div>
+  <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+    <button id="meta-continue-btn" onclick="metaContinue()" style="padding:10px 28px;background:#2244aa;border:none;border-radius:6px;color:#fff;font-size:15px;cursor:pointer;font-family:monospace">▶ Continue with Perks</button>
+    <button onclick="startGame(false)" style="padding:10px 22px;background:#553300;border:none;border-radius:6px;color:#fff;font-size:13px;cursor:pointer;font-family:monospace">🔄 New Game (reset all)</button>
+  </div>
 </div>
 
 <script>
@@ -214,9 +229,9 @@ function lerpRGB(a,b,t){return[Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b
 function rgb(a){return`rgb(${a[0]},${a[1]},${a[2]})`;}
 function rgba(a,al){return`rgba(${a[0]},${a[1]},${a[2]},${al})`;}
 function getBiome(distance){
-  const len=500,rawIdx=distance/len,idx=Math.floor(rawIdx),t=rawIdx-idx;
+  const len=500,rawIdx=Math.min(distance/len,14.99),idx=Math.floor(rawIdx),t=rawIdx-idx;
   const blend=t>0.7?(t-0.7)/0.3:0;
-  const cur=BIOMES[idx%20],nxt=BIOMES[(idx+1)%20];
+  const cur=BIOMES[idx],nxt=BIOMES[Math.min(idx+1,14)];
   return{name:blend>0.4?nxt.name:cur.name,sky0:lerpRGB(cur.sky0,nxt.sky0,blend),sky1:lerpRGB(cur.sky1,nxt.sky1,blend),
     gnd:lerpRGB(cur.gnd,nxt.gnd,blend),gndA:lerpRGB(cur.gndA,nxt.gndA,blend),plt:lerpRGB(cur.plt,nxt.plt,blend),
     pltA:lerpRGB(cur.pltA,nxt.pltA,blend),bg:lerpRGB(cur.bg,nxt.bg,blend),bgA:cur.bgA+(nxt.bgA-cur.bgA)*blend,
@@ -312,6 +327,30 @@ function pickUpgrades(){
   return picks;
 }
 
+// ---- Meta Progression ----
+const META_PERKS = [
+  { id:'hp',    icon:'❤️',  name:'+2 Max HP',       desc:'Start every run with +2 HP',       cost:3,  max:5, apply:(h)=>{ h.maxHp+=2; h.hp+=2; }},
+  { id:'atk',   icon:'⚔️',  name:'+1 Attack',       desc:'Start every run +1 stronger',       cost:5,  max:3, apply:(h)=>{ h.atkPow+=1; }},
+  { id:'def',   icon:'🛡️',  name:'+1 Defense',      desc:'Start every run more armored',      cost:4,  max:3, apply:(h)=>{ h.defense+=1; }},
+  { id:'coins', icon:'🪙',  name:'+80 Start Coins',  desc:'Begin each run with extra coins',   cost:6,  max:3, apply:(h,s)=>{ s.coinCount+=80; }},
+  { id:'sword', icon:'🗡️',  name:'Start with Sword', desc:'Begin with Sword Lv.1 equipped',   cost:15, max:1, apply:(h)=>{ h.weapons.sword.level=1; h._weaponPath='sword'; }},
+  { id:'gun',   icon:'🔫',  name:'Start with Gun',   desc:'Begin with Gun Lv.1 equipped',     cost:15, max:1, apply:(h)=>{ h.weapons.gun.level=1; h._weaponPath='gun'; }},
+  { id:'vampi', icon:'🧛',  name:'Vampirism',        desc:'Start with Vampirism perk active',  cost:12, max:1, apply:(h)=>{ h._vampirism=true; }},
+  { id:'djump', icon:'🦅',  name:'Double Jump',      desc:'Start with Double Jump unlocked',   cost:10, max:1, apply:(h)=>{ h._doubleJump=true; }},
+];
+function loadMeta(){
+  try{ return JSON.parse(localStorage.getItem('fwd_meta'))||{diamonds:0,perks:{}}; }
+  catch(e){ return {diamonds:0,perks:{}}; }
+}
+function saveMeta(m){ localStorage.setItem('fwd_meta',JSON.stringify(m)); }
+function applyMetaPerks(s){
+  const meta=loadMeta();
+  for(const perk of META_PERKS){
+    const count=meta.perks[perk.id]||0;
+    for(let i=0;i<count;i++) perk.apply(s.hero,s);
+  }
+}
+
 // ---- State ----
 let state;
 function createState() {
@@ -373,6 +412,23 @@ function generateChunk(s, fromX) {
     const px=fromX+100+Math.random()*600;
     s.powerups.push({x:px,y:GROUND-38,w:28,h:28,path,modeKey,modeDef,collected:false});
   }
+  // Purple Diamond (~1.5% per chunk)
+  if(Math.random()<0.015){
+    s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-32,w:20,h:20,collected:false});
+  }
+  // Dragon Boss — spawns once at biome 14 (~7000m)
+  if(!s.bossSpawned && s.distance>=7000 && fromX>=7200){
+    s.bossSpawned=true;
+    s.enemies.push({
+      x:fromX+250,y:GROUND-70,w:80,h:60,vx:0,vy:0,onGround:false,facing:-1,
+      type:'dragon',tier:3,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+      hp:3000,maxHp:3000,atk:20,speed:1.8,xpVal:500,
+      color:'#cc2200',defense:0,flySine:0,_orbCd:0,_breathCd:0,_wingFlap:0,
+      patrolDir:-1,patrolTimer:0,
+    });
+    s.diamonds.push({x:fromX+500,y:GROUND-32,w:20,h:20,collected:false});
+    s.diamonds.push({x:fromX+560,y:GROUND-32,w:20,h:20,collected:false});
+  }
   const numE=Math.min(6, Math.floor(1 + density * 160 * diffMult));
   for(let i=0;i<numE;i++){
     const ex=fromX+200+Math.random()*700;
@@ -380,11 +436,17 @@ function generateChunk(s, fromX) {
   }
 }
 function pickEnemyType(lvl,dist){
-  if(dist<300) return 'walker';
-  if(dist<800) return Math.random()<0.3?'jumper':'walker';
-  if(dist<1500) return Math.random()<0.4?'jumper':Math.random()<0.3?'shooter':'walker';
-  const r=Math.random();
-  return r<0.25?'jumper':r<0.5?'shooter':r<0.65?'heavy':'walker';
+  const biome=Math.floor(dist/500);
+  const pool=['walker'];
+  if(biome>=2) pool.push('jumper');
+  if(biome>=4) pool.push('shooter');
+  if(biome>=6) pool.push('horned');
+  if(biome>=8) pool.push('poisoner');
+  if(biome>=10) pool.push('large');
+  if(biome>=12) pool.push('fast');
+  // Bias toward newest enemy type (30% chance)
+  if(pool.length>1&&Math.random()<0.3) return pool[pool.length-1];
+  return pool[Math.floor(Math.random()*pool.length)];
 }
 function spawnEnemy(x,type,lvl,diff,dist){
   const tier=dist<1000?0:dist<3000?1:dist<6000?2:3;
@@ -394,7 +456,11 @@ function spawnEnemy(x,type,lvl,diff,dist){
     case 'walker': {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.5)*diff));return{...base,hp,maxHp:hp,atk,speed:1+lvl*0.15,xpVal:Math.floor((4+lvl*2)*xpMult),color:strengthColor(hp,atk)};}
     case 'jumper': {const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.7)*diff));return{...base,hp,maxHp:hp,atk,speed:1.5+lvl*0.2,xpVal:Math.floor((6+lvl*2)*xpMult),color:strengthColor(hp,atk),w:24,h:28,jumpCd:0};}
     case 'shooter':{const hp=2+lvl,pAtk=Math.max(1,Math.floor((1+lvl*0.6)*diff));return{...base,hp,maxHp:hp,atk:0,speed:0.4,xpVal:Math.floor((8+lvl*3)*xpMult),color:strengthColor(hp,pAtk),shootCd:0,projAtk:pAtk};}
-    case 'heavy':  {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.6+lvl*0.1,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
+    case 'heavy':   {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.6+lvl*0.1,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
+    case 'horned':  {const hp=4+lvl,atk=Math.max(2,Math.floor((2+lvl*0.8)*diff));return{...base,hp,maxHp:hp,atk,speed:1.3+lvl*0.15,xpVal:Math.floor((7+lvl*2)*xpMult),color:strengthColor(hp,atk),w:32,h:32,chargeTimer:0};}
+    case 'poisoner':{const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.4)*diff));return{...base,hp,maxHp:hp,atk,speed:1.2+lvl*0.1,xpVal:Math.floor((9+lvl*2)*xpMult),color:'#44cc44',w:26,h:30,_poisonAtk:true};}
+    case 'large':   {const hp=20+lvl*4,atk=Math.max(2,Math.floor((2+lvl*1.2)*diff));return{...base,hp,maxHp:hp,atk,speed:0.5+lvl*0.05,xpVal:Math.floor((18+lvl*5)*xpMult),color:strengthColor(hp,atk),w:52,h:52};}
+    case 'fast':    {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.3)*diff));return{...base,hp,maxHp:hp,atk,speed:3.5+lvl*0.3,xpVal:Math.floor((8+lvl*2)*xpMult),color:'#ffcc00',w:20,h:26};}
     default: return base;
   }
 }
@@ -579,6 +645,15 @@ function update(s) {
   s.diamonds=s.diamonds.filter(d=>d.x>cullX);
   projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoomX+100);
 
+  // Hero poison (from poisoner enemies)
+  if(h._poison){
+    h._poison.timer--;
+    if(h._poison.timer<=0){
+      h._poison.timer=40; heroHit(s,h._poison.dmg);
+      spawnParticles(s,h.x+h.w/2,h.y,'#44cc44',3);
+      h._poison.ticks--; if(h._poison.ticks<=0) h._poison=null;
+    }
+  }
   if(h.attackTimer>0) h.attackTimer--;
   if(h.attackCooldown>0) h.attackCooldown--;
   if(h.invTimer>0) h.invTimer--;
@@ -600,13 +675,25 @@ function update(s) {
   for(const pu of s.powerups){
     if(!pu.collected&&rectOverlap(h,pu)){
       pu.collected=true;
-      if(pu.path==='gun') h._gunMode=pu.modeKey;
+      if(pu.isWings){ h._wings=true; }
+      else if(pu.path==='gun') h._gunMode=pu.modeKey;
       else h._swordMode=pu.modeKey;
       spawnParticles(s,pu.x+pu.w/2,pu.y+pu.h/2,pu.modeDef.color,16);
       s._popups.push({x:pu.x+pu.w/2,y:pu.y-8,text:pu.modeDef.icon+' '+pu.modeDef.label+'!',life:120,vy:-0.7});
     }
   }
   s.powerups=s.powerups.filter(pu=>!pu.collected);
+
+  // Diamond collection
+  for(const d of s.diamonds){
+    if(!d.collected&&rectOverlap(h,d)){
+      d.collected=true;
+      const meta=loadMeta(); meta.diamonds++; saveMeta(meta);
+      spawnParticles(s,d.x+d.w/2,d.y+d.h/2,'#cc44ff',14);
+      s._popups.push({x:d.x+d.w/2,y:d.y-8,text:'💎 +1 Diamond!',life:100,vy:-0.7});
+    }
+  }
+  s.diamonds=s.diamonds.filter(d=>!d.collected);
 
   for(const e of s.enemies) updateEnemy(s,e);
 
@@ -798,6 +885,13 @@ function damageEnemy(s,e,dmg){
     for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:Math.round(baseVal*coinMult),collected:false});
     const h=s.hero;
     if(h._vampirism && Math.random()<0.10){ h.hp=Math.min(h.hp+1,h.maxHp); spawnParticles(s,h.x+h.w/2,h.y,'#ff0055',3); }
+    // Dragon drops Wings
+    if(e.type==='dragon'){
+      s.powerups.push({x:e.x+e.w/2-16,y:e.y,w:32,h:32,
+        path:'wings',modeKey:'wings',modeDef:{icon:'🪽',label:'Wings',color:'#e8f4ff'},
+        collected:false,isWings:true});
+      s._popups.push({x:e.x+e.w/2,y:e.y-20,text:'🪽 WINGS DROPPED!',life:180,vy:-0.5});
+    }
   }
 }
 
@@ -847,6 +941,25 @@ function updateEnemy(s,e){
       if(absDist<36&&Math.abs(h.y-e.y)<e.h+20&&h.invTimer<=0) heroHit(s,e.atk);}
     return;
   }
+  if(e.type==='dragon'){
+    e.flySine=(e.flySine||0)+0.03;
+    e.y+=Math.sin(e.flySine)*1.4;
+    e._wingFlap=(e._wingFlap||0)+1;
+    const dragonAggro=absDist<500;
+    if(dragonAggro){
+      e.vx=dir*e.speed; e.x+=e.vx; e.facing=dir;
+      if(absDist<60&&Math.abs(h.y-e.y)<e.h+30&&h.invTimer<=0) heroHit(s,e.atk);
+      e._breathCd=(e._breathCd||0)-1;
+      if(e._breathCd<=0&&absDist<320){
+        e._breathCd=65;
+        for(let i=0;i<3;i++) projectiles.push({
+          x:e.x+(e.facing===1?e.w:0),y:e.y+e.h*0.4,
+          vx:e.facing*(5+i*0.6),vy:(i-1)*0.9,
+          w:14,h:14,life:60,fromEnemy:true,hit:false,atk:e.atk,color:'#ff4400',gravity:0.05});
+      }
+    }
+    return;
+  }
   e.vy+=0.5; e.y+=e.vy;
   if(e.y+e.h>=GROUND){e.y=GROUND-e.h;e.vy=0;e.onGround=true;}else e.onGround=false;
   for(const p of s.platforms){
@@ -857,11 +970,11 @@ function updateEnemy(s,e){
   const frozen=e._freeze&&e._freeze.dur>0;
   const effSpd=frozen?e.speed*0.15:e.speed;
   switch(e.type){
-    case 'walker': case 'heavy':
+    case 'walker': case 'heavy': case 'large':
       if(aggro){e.vx=dir*effSpd;e.facing=dir;}
       else{e.patrolTimer--;if(e.patrolTimer<=0){e.patrolDir*=-1;e.patrolTimer=60+Math.random()*60;}e.vx=e.patrolDir*effSpd*0.5;e.facing=e.patrolDir;}
       e.x+=e.vx;
-      if(absDist<38&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0) heroHit(s,e.atk);
+      if(absDist<(e.type==='large'?48:38)&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0) heroHit(s,e.atk);
       break;
     case 'jumper':
       if(aggro){
@@ -880,6 +993,28 @@ function updateEnemy(s,e){
       if(e.shootCd>0) e.shootCd--;
       if(absDist<120) e.x-=dir*effSpd;
       break;
+    case 'horned':
+      if(aggro){
+        e.facing=dir; e.chargeTimer=(e.chargeTimer||0)-1;
+        if(e.chargeTimer<=0&&absDist<180&&!frozen){e.vx=dir*effSpd*3.5;e.chargeTimer=90;}
+        else e.vx=dir*effSpd;
+        e.x+=e.vx;
+        if(absDist<42&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0) heroHit(s,e.atk*2);
+      }
+      break;
+    case 'poisoner':
+      if(aggro){e.vx=dir*effSpd;e.facing=dir;}
+      else{e.patrolTimer--;if(e.patrolTimer<=0){e.patrolDir*=-1;e.patrolTimer=60+Math.random()*60;}e.vx=e.patrolDir*effSpd*0.5;e.facing=e.patrolDir;}
+      e.x+=e.vx;
+      if(absDist<36&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0){
+        heroHit(s,e.atk);
+        if(!h._poison) h._poison={ticks:5,dmg:1,timer:40};
+      }
+      break;
+    case 'fast':
+      if(aggro){e.vx=dir*effSpd;e.facing=dir;e.x+=e.vx;
+        if(absDist<30&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0) heroHit(s,e.atk);}
+      break;
   }
 }
 
@@ -896,6 +1031,7 @@ function draw(s){
   const bm=getBiome(s.distance);
   drawBackground(s,bm);
   drawPlatforms(s,bm);
+  drawDiamonds(s);
   drawCoins(s);
   drawPowerups(s);
   drawEnemies(s);
@@ -1005,6 +1141,21 @@ function drawPowerups(s){
     const bob=Math.sin(t*0.07+pu.x*0.02)*4;
     const glow=0.55+0.45*Math.sin(t*0.1);
     const col=pu.modeDef.color;
+    if(pu.isWings){
+      const wBob=Math.sin(t*0.07+pu.x*0.02)*5;
+      ctx.save();
+      ctx.globalAlpha=0.4+0.3*Math.sin(t*0.1);
+      ctx.fillStyle='#ffd700';
+      ctx.beginPath();ctx.arc(pu.x+pu.w/2,pu.y+pu.h/2+wBob,pu.w*0.8,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.font='26px serif';ctx.textAlign='center';
+      ctx.fillText('🪽',pu.x+pu.w/2,pu.y+pu.h/2+wBob+9);
+      ctx.font='bold 8px monospace';ctx.fillStyle='#ffd700';
+      ctx.fillText('WINGS',pu.x+pu.w/2,pu.y+wBob-4);
+      ctx.textAlign='left';
+      ctx.restore();
+      continue;
+    }
     ctx.save();
     // Outer glow
     ctx.globalAlpha=0.3*glow;
@@ -1025,6 +1176,30 @@ function drawPowerups(s){
     ctx.font='bold 7px monospace';ctx.fillStyle='#fff';ctx.textBaseline='bottom';
     ctx.fillText(pu.modeDef.label,pu.x+pu.w/2,pu.y+bob-2);
     ctx.textBaseline='alphabetic';ctx.textAlign='left';
+    ctx.restore();
+  }
+}
+
+function drawDiamonds(s){
+  const t=s.frameCount;
+  for(const d of s.diamonds){
+    if(d.x<s.camera-30||d.x>s.camera+W/gameZoomX+30) continue;
+    const bob=Math.sin(t*0.09+d.x*0.02)*3;
+    const cx=d.x+d.w/2, cy=d.y+d.h/2+bob, r=d.w/2;
+    ctx.save();
+    // Glow
+    ctx.globalAlpha=0.4+0.3*Math.sin(t*0.12);
+    ctx.fillStyle='#cc44ff';
+    ctx.beginPath();ctx.arc(cx,cy,r*1.5,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // Spinning diamond
+    ctx.translate(cx,cy);ctx.rotate(t*0.05);
+    const g=ctx.createLinearGradient(-r,-r,r,r);
+    g.addColorStop(0,'#ee88ff');g.addColorStop(0.5,'#aa00ff');g.addColorStop(1,'#6600cc');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.moveTo(0,-r*1.1);ctx.lineTo(r*0.85,0);ctx.lineTo(0,r*1.1);ctx.lineTo(-r*0.85,0);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.beginPath();ctx.moveTo(0,-r*1.1);ctx.lineTo(r*0.85,0);ctx.lineTo(0,-r*0.2);ctx.closePath();ctx.fill();
     ctx.restore();
   }
 }
@@ -1260,6 +1435,43 @@ function drawEnemies(s){
       }
       continue;
     }
+    if(e.type==='dragon'){
+      const flash=e.hitTimer>0;
+      ctx.save();
+      ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      if(e.facing===-1) ctx.scale(-1,1);
+      const wf=Math.sin((e._wingFlap||0)*0.15);
+      // Aura
+      ctx.globalAlpha=0.22+0.12*Math.sin(s.frameCount*0.1);
+      ctx.fillStyle='#ff4400';
+      ctx.beginPath();ctx.arc(0,0,e.w/2+22,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      // Wings
+      ctx.fillStyle=flash?'#fff':'#881100';
+      ctx.beginPath();ctx.ellipse(-e.w*0.72,wf*8,e.w*0.42,e.h*0.3,0.3,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse( e.w*0.72,wf*8,e.w*0.42,e.h*0.3,-0.3,0,Math.PI*2);ctx.fill();
+      // Body
+      ctx.fillStyle=flash?'#fff':'#cc2200';
+      ctx.beginPath();ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2);ctx.fill();
+      // Head
+      ctx.fillStyle=flash?'#fff':'#dd3300';
+      ctx.beginPath();ctx.ellipse(e.w*0.42,-4,e.w*0.26,e.h*0.24,0,0,Math.PI*2);ctx.fill();
+      // Horns
+      ctx.fillStyle='#ffaa00';
+      ctx.beginPath();ctx.moveTo(e.w*0.36,-e.h*0.28);ctx.lineTo(e.w*0.44,-e.h*0.52);ctx.lineTo(e.w*0.52,-e.h*0.26);ctx.fill();
+      // Eye
+      ctx.fillStyle='#ffff00';ctx.beginPath();ctx.arc(e.w*0.48,-4,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#000';ctx.beginPath();ctx.arc(e.w*0.49,-4,2,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+      // HP bar
+      const hbW=e.w+14;
+      ctx.fillStyle='#333';ctx.fillRect(e.x-7,e.y-16,hbW,7);
+      ctx.fillStyle='#ff2200';ctx.fillRect(e.x-7,e.y-16,hbW*(e.hp/e.maxHp),7);
+      ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.fillStyle='#ffaa00';
+      ctx.fillText('🐉 DRAGON BOSS',e.x+e.w/2,e.y-20);
+      ctx.textAlign='left';
+      continue;
+    }
     const tier=e.tier||0;
     const flash=e.hitTimer>0;
     const frozen=e._freeze&&e._freeze.dur>0;
@@ -1365,14 +1577,29 @@ function drawHUD(s){
   ctx.fillStyle='#8844ff';ctx.fillRect(0,H-6,W*(h.xp/h.xpNext),6);
 
   // Weapon cooldown HUD (top-right of canvas)
-  const jpFuelMax=JP_FUEL[h.weapons.jetpack.level]||1;
   const weapons=[
-    {key:'sword',   icon:'🗡️',cd:0,maxCd:1,hint:'Z/X'},
+    {key:'sword',   icon:'🗡\uFE0F',cd:0,maxCd:1,hint:'Z/X'},
     {key:'gun',     icon:'🔫',cd:h.gunCooldown,maxCd:GUN_CD[h.weapons.gun.level]||38,hint:'C'},
     {key:'fireball',icon:'🔥',cd:h.fireballCooldown,maxCd:FB_CD[h.weapons.fireball.level]||100,hint:'V'},
-    {key:'jetpack', icon:'🚀',cd:jpFuelMax-h.jetpackFuel,maxCd:jpFuelMax,hint:'J hold'},
     {key:'orbs',    icon:'🔮',cd:0,maxCd:1,hint:'auto'},
   ].filter(w=>h.weapons[w.key]&&h.weapons[w.key].level>0);
+  // Wings indicator
+  if(h._wings||h._wingsActive){
+    ctx.font='18px serif';ctx.textAlign='right';
+    ctx.fillText(h._wingsActive?'🪽✨':'🪽',W-8,22);
+    if(h._wingsActive){
+      ctx.fillStyle='#aaddff';ctx.font='9px monospace';
+      ctx.fillText('FLYING',W-8,34);
+    }
+    ctx.textAlign='left';
+  }
+  // Diamond count
+  const meta=loadMeta();
+  if(meta.diamonds>0||true){
+    ctx.font='13px monospace';ctx.fillStyle='#cc88ff';ctx.textAlign='right';
+    ctx.fillText('💎 '+meta.diamonds,W-8,H-10);
+    ctx.textAlign='left';
+  }
 
   let wx=W-8;
   ctx.textAlign='right';
@@ -1438,6 +1665,37 @@ function closeShop(){
   document.getElementById('shop-screen').classList.remove('show');
 }
 
+// ---- Meta Shop ----
+function openMetaShop(){
+  document.getElementById('gameover').style.display='none';
+  document.getElementById('meta-shop').classList.add('show');
+  renderMetaShop();
+}
+
+function renderMetaShop(){
+  const meta=loadMeta();
+  document.getElementById('meta-diamond-count').textContent='💎 Diamonds: '+meta.diamonds;
+  const cont=document.getElementById('meta-items');
+  cont.innerHTML='';
+  META_PERKS.forEach(perk=>{
+    const owned=meta.perks[perk.id]||0;
+    const maxed=owned>=perk.max;
+    const can=!maxed&&meta.diamonds>=perk.cost;
+    const div=document.createElement('div');
+    div.className='shop-item'+(maxed?' maxed':can?'':' cant-afford');
+    const ownedBadge=owned>0?`<span class="wlvl">${owned}/${perk.max}</span>`:'';
+    div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${ownedBadge}</div><div class="s-desc">${perk.desc}</div><div class="s-cost">${maxed?'✓ MAX':'💎 '+perk.cost}</div>`;
+    if(can) div.onclick=()=>{ meta.diamonds-=perk.cost; meta.perks[perk.id]=(meta.perks[perk.id]||0)+1; saveMeta(meta); renderMetaShop(); };
+    cont.appendChild(div);
+  });
+}
+
+function metaContinue(){
+  document.getElementById('meta-shop').classList.remove('show');
+  restartGame(true);
+  if(!gameStarted){ gameStarted=true; loop(); }
+}
+
 function renderShop(){
   document.getElementById('shop-coin-count').textContent=state.coinCount;
   // Consumables
@@ -1491,7 +1749,6 @@ function renderShop(){
       h2.weapons[key].level++;
       // Lock weapon path on first gun/sword purchase
       if((key==='gun'||key==='sword')&&h2.weapons[key].level===1) h2._weaponPath=key;
-      if(key==='jetpack') h2.jetpackFuel=JP_FUEL[h2.weapons.jetpack.level];
       renderShop();
     };
     wpn.appendChild(div);
@@ -1501,15 +1758,48 @@ function renderShop(){
 // ---- Game Over ----
 function showGameOver(s){
   document.getElementById('go-stats').innerHTML=`Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount}`;
+  const meta=loadMeta();
+  document.getElementById('go-diamonds').textContent='💎 Total Diamonds: '+meta.diamonds;
   document.getElementById('gameover').style.display='block';
 }
 
-function restartGame(){
+// ---- Meta Shop ----
+function openMetaShop(){
   document.getElementById('gameover').style.display='none';
+  document.getElementById('meta-shop').classList.add('show');
+  renderMetaShop();
+}
+function renderMetaShop(){
+  const meta=loadMeta();
+  document.getElementById('meta-diamond-count').textContent='💎 Diamonds: '+meta.diamonds;
+  const cont=document.getElementById('meta-items');
+  cont.innerHTML='';
+  META_PERKS.forEach(perk=>{
+    const owned=meta.perks[perk.id]||0;
+    const maxed=owned>=perk.max;
+    const can=!maxed&&meta.diamonds>=perk.cost;
+    const div=document.createElement('div');
+    div.className='shop-item'+(maxed?' maxed':can?'':' cant-afford');
+    const badge=owned>0?`<span class="wlvl">${owned}/${perk.max}</span>`:'';
+    div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${badge}</div><div class="s-desc">${perk.desc}</div><div class="s-cost">${maxed?'✓ MAX':'💎 '+perk.cost}</div>`;
+    if(can) div.onclick=()=>{ meta.diamonds-=perk.cost; meta.perks[perk.id]=(meta.perks[perk.id]||0)+1; saveMeta(meta); renderMetaShop(); };
+    cont.appendChild(div);
+  });
+}
+function metaContinue(){
+  document.getElementById('meta-shop').classList.remove('show');
+  restartGame(true);
+  if(!gameStarted){ gameStarted=true; loop(); }
+}
+
+function restartGame(applyMeta){
+  document.getElementById('gameover').style.display='none';
+  document.getElementById('meta-shop').classList.remove('show');
   document.getElementById('upgrade-screen').classList.remove('show');
   document.getElementById('shop-screen').classList.remove('show');
   projectiles=[];
   state=createState();
+  if(applyMeta) applyMetaPerks(state);
   generateChunk(state,300);
   state.worldX=1100;
 }
@@ -1518,11 +1808,20 @@ function rectOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>
 
 // ---- Main Menu ----
 let gameStarted = false;
-function startGame(){
+function startGame(continueRun){
   document.getElementById('main-menu').classList.remove('show');
-  restartGame();
+  document.getElementById('meta-shop').classList.remove('show');
+  if(!continueRun){ saveMeta({diamonds:0,perks:{}}); }
+  restartGame(continueRun);
   if(!gameStarted){ gameStarted=true; loop(); }
 }
+function updateMenuButtons(){
+  const meta=loadMeta();
+  const hasMeta=meta.diamonds>0||Object.keys(meta.perks||{}).length>0;
+  const btn=document.getElementById('continue-btn');
+  if(btn) btn.style.display=hasMeta?'':'none';
+}
+updateMenuButtons();
 
 // ---- Input ----
 window.addEventListener('keydown',e=>{
