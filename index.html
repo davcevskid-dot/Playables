@@ -223,13 +223,14 @@ function getBiome(distance){
     isSpace:cur.name==='Space'||cur.name==='Shadow Realm'};
 }
 
-// ---- Enemy tier colors ----
-const TIER_COLORS = {
-  walker:  ['#e06030','#c84020','#b02010','#8a0010'],
-  jumper:  ['#30b0e0','#2080c8','#1050a8','#002070'],
-  shooter: ['#c040e0','#a020c8','#7800a8','#4a0080'],
-  heavy:   ['#e04040','#c01010','#900000','#600000'],
-};
+// ---- Dynamic enemy color based on strength ----
+function strengthColor(hp, atk) {
+  const str = hp + atk * 14;
+  const t = Math.min(1, str / 500);
+  if(t < 0.33) return rgb(lerpRGB([60,190,50],[220,210,0],t*3.03));
+  if(t < 0.66) return rgb(lerpRGB([220,210,0],[220,90,10],(t-0.33)*3.03));
+  return rgb(lerpRGB([220,90,10],[110,0,50],(t-0.66)*3.03));
+}
 
 // ---- Weapons definition ----
 const WEAPON_DEFS = {
@@ -257,6 +258,12 @@ const WEAPON_DEFS = {
     descs:['Basic thruster — very limited fuel','More thrust, still short-range','Lv.3: Sky Kingdom within reach!','High-altitude cruiser, long fuel','⭐ Legendary! Master of the skies!'],
     cost: lvl => Math.round(200 * Math.pow(2.0, lvl)),
   },
+  orbs: {
+    icon:'🔮', name:'Orb Shield', key:'[passive]', baseCost:120,
+    maxLevel:5,
+    descs:['1 orb rotates around you, 5 dmg','2 orbs, 8 dmg each','3 orbs, 12 dmg each','4 orbs, 16 dmg each','5 orbs, 20 dmg each + bigger'],
+    cost: lvl => Math.round(120 * Math.pow(1.8, lvl)),
+  },
 };
 const SWORD_DMG   = [0, 4, 8, 12, 16, 20];
 const SWORD_RANGE = [0, 70, 90, 110, 130, 155];
@@ -274,27 +281,25 @@ const SKY_X_THRESHOLD = 8000; // distance before sky enemies go ultra-hard
 
 // ---- Shop consumables ----
 const SHOP_ITEMS = [
-  { icon:'⚔️', name:'Damage Shard', desc:'+2 Attack',        cost:20, apply:h=>{ h.atkPow+=2; }},
-  { icon:'🛡️', name:'Shield Stone', desc:'+1 Defense',        cost:25, apply:h=>{ h.defense+=1; }},
-  { icon:'💎', name:'Life Crystal', desc:'+5 Max HP & heal',  cost:18, apply:h=>{ h.maxHp+=5; h.hp=Math.min(h.hp+5,h.maxHp); }},
-  { icon:'👟', name:'Speed Boots',  desc:'+0.4 Move speed',   cost:30, apply:h=>{ h.speed+=0.4; }},
-  { icon:'🧪', name:'Full Elixir',  desc:'Restore all HP',    cost:12, apply:h=>{ h.hp=h.maxHp; }},
-  { icon:'🎯', name:'Crit Gem',     desc:'+15% crit chance',  cost:35, apply:h=>{ h._crit=(h._crit||0)+0.15; }},
-  { icon:'🦘', name:'Jump Crystal', desc:'+1 Jump power',     cost:22, apply:h=>{ h.jumpPow+=1; }},
-  { icon:'⭐', name:'XP Tome',      desc:'+25% XP gain',      cost:28, apply:h=>{ h._xpMult=(h._xpMult||1)*1.25; }},
+  { icon:'🧃', name:'Small Potion',  desc:'Restore 2 HP',                cost: 8,  apply:h=>{ h.hp=Math.min(h.hp+2,h.maxHp); }},
+  { icon:'🧪', name:'Medium Potion', desc:'Restore 5 HP',                 cost:18,  apply:h=>{ h.hp=Math.min(h.hp+5,h.maxHp); }},
+  { icon:'💊', name:'Large Potion',  desc:'Restore 50% Max HP',           cost:35,  apply:h=>{ h.hp=Math.min(h.hp+Math.ceil(h.maxHp*0.5),h.maxHp); }},
+  { icon:'⛽', name:'Jet Fuel',      desc:'Refills jetpack fuel instantly',cost:20,  apply:h=>{ const l=h.weapons.jetpack.level; if(l>0)h.jetpackFuel=JP_FUEL[l]; }},
+  { icon:'🦘', name:'Jump Springs',  desc:'+2 Jump for 20 seconds',       cost:22,  apply:h=>{ h._jumpSpringTimer=1200; }},
+  { icon:'🛡️', name:'Energy Shield', desc:'Negate the next hit taken',    cost:28,  apply:h=>{ h._shield=true; }},
+  { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
 ];
 
 // ---- Upgrade Pool ----
 const UPGRADE_POOL = [
-  { icon:'❤️', name:'Vitality',    desc:'+3 Max HP, full heal', apply:h=>{ h.maxHp+=3; h.hp=h.maxHp; }},
-  { icon:'⚔️', name:'Power',       desc:'+1 Attack damage',     apply:h=>{ h.atkPow+=1; }},
-  { icon:'🛡️', name:'Fortify',     desc:'+1 Defense',           apply:h=>{ h.defense+=1; }},
-  { icon:'🦘', name:'Spring Legs', desc:'+1 Jump power',        apply:h=>{ h.jumpPow+=1; }},
-  { icon:'💨', name:'Speed',       desc:'+0.5 Move speed',      apply:h=>{ h.speed+=0.5; }},
-  { icon:'⭐', name:'Wisdom',      desc:'+30% XP gain',         apply:h=>{ h._xpMult=(h._xpMult||1)*1.3; }},
-  { icon:'💊', name:'Medkit',      desc:'+5 HP now',            apply:h=>{ h.hp=Math.min(h.hp+5,h.maxHp); }},
-  { icon:'🎯', name:'Critical',    desc:'20% chance 3x damage', apply:h=>{ h._crit=(h._crit||0)+0.2; }},
-  { icon:'🪙', name:'Greedy',      desc:'+15 coins now',        apply:(_,s)=>{ s.coinCount+=15; }},
+  { icon:'❤️',  name:'Vitality',   desc:'+3 Max HP + heal 3',              apply:h=>{ h.maxHp+=3; h.hp=Math.min(h.hp+3,h.maxHp); }},
+  { icon:'⚔️',  name:'Power',      desc:'+1 Base Attack (all weapons)',     apply:h=>{ h.atkPow+=1; }},
+  { icon:'⚡',  name:'Haste',      desc:'-10% weapon cooldowns',            apply:h=>{ h._hasteMult=(h._hasteMult||1)*0.9; }},
+  { icon:'🛡️',  name:'Thick Skin', desc:'+1 Defense (cap 8)',               apply:h=>{ h.defense=Math.min(8,h.defense+1); }},
+  { icon:'🎯',  name:'Critical Eye',desc:'+10% crit chance (2× dmg)',       apply:h=>{ h._crit=(h._crit||0)+0.10; }},
+  { icon:'🪙',  name:'Scavenger',  desc:'Enemies drop 25% more coins',      apply:(_,s)=>{ s._coinMult=(s._coinMult||1)*1.25; }},
+  { icon:'⭐',  name:'Wisdom',     desc:'+20% XP gain',                     apply:h=>{ h._xpMult=(h._xpMult||1)*1.2; }},
+  { icon:'🧛',  name:'Vampirism',  desc:'10% chance to heal 1 HP on kill',  apply:h=>{ h._vampirism=true; }},
 ];
 function pickUpgrades(){
   const pool=[...UPGRADE_POOL],picks=[];
@@ -316,13 +321,14 @@ function createState() {
       hp:5, maxHp:5,
       lvl:1, xp:0, xpNext:20,
       atkPow:1, defense:0, jumpPow:1, speed:1,
-      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, jetpack:{level:0} },
+      weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, jetpack:{level:0}, orbs:{level:0} },
       gunCooldown:0, fireballCooldown:0, jetpackFuel:0, jetting:false,
+      _jumpSpringTimer:0, _shield:false, _speedBootCount:0, _hasteMult:1, _vampirism:false,
     },
     platforms:[], coins:[], enemies:[], particles:[],
     worldX:0, keys:{}, frameCount:0,
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
-    reachedSkyKingdom:false,
+    reachedSkyKingdom:false, _coinMult:1,
   };
 }
 
@@ -359,13 +365,13 @@ function pickEnemyType(lvl,dist){
 }
 function spawnEnemy(x,type,lvl,diff,dist){
   const tier=dist<1000?0:dist<3000?1:dist<6000?2:3;
-  const color=(TIER_COLORS[type]||TIER_COLORS.walker)[tier];
-  const base={x,y:GROUND,w:30,h:34,vx:0,vy:0,onGround:false,facing:-1,type,tier,dead:false,hitTimer:0,animFrame:0,animTimer:0,patrolDir:Math.random()<0.5?1:-1,patrolTimer:0};
+  const xpMult=Math.max(1,1+dist/2000);
+  const base={x,y:GROUND,w:30,h:34,vx:0,vy:0,onGround:false,facing:-1,type,tier,dead:false,hitTimer:0,animFrame:0,animTimer:0,patrolDir:Math.random()<0.5?1:-1,patrolTimer:0,_orbCd:0};
   switch(type){
-    case 'walker':  return{...base,hp:2+lvl,   maxHp:2+lvl,   atk:Math.max(1,Math.floor((1+lvl*0.5)*diff)),speed:1+lvl*0.15,  xpVal:4+lvl*2, color};
-    case 'jumper':  return{...base,hp:3+lvl,   maxHp:3+lvl,   atk:Math.max(1,Math.floor((1+lvl*0.7)*diff)),speed:1.5+lvl*0.2,xpVal:6+lvl*2, color,w:24,h:28,jumpCd:0};
-    case 'shooter': return{...base,hp:2+lvl,   maxHp:2+lvl,   atk:0,speed:0.4,                              xpVal:8+lvl*3, color,shootCd:0,projAtk:Math.max(1,Math.floor((1+lvl*0.6)*diff))};
-    case 'heavy':   return{...base,hp:8+lvl*2, maxHp:8+lvl*2, atk:Math.max(1,Math.floor((2+lvl)*diff)),   speed:0.6+lvl*0.1,xpVal:12+lvl*4,color,w:40,h:44};
+    case 'walker': {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.5)*diff));return{...base,hp,maxHp:hp,atk,speed:1+lvl*0.15,xpVal:Math.floor((4+lvl*2)*xpMult),color:strengthColor(hp,atk)};}
+    case 'jumper': {const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.7)*diff));return{...base,hp,maxHp:hp,atk,speed:1.5+lvl*0.2,xpVal:Math.floor((6+lvl*2)*xpMult),color:strengthColor(hp,atk),w:24,h:28,jumpCd:0};}
+    case 'shooter':{const hp=2+lvl,pAtk=Math.max(1,Math.floor((1+lvl*0.6)*diff));return{...base,hp,maxHp:hp,atk:0,speed:0.4,xpVal:Math.floor((8+lvl*3)*xpMult),color:strengthColor(hp,pAtk),shootCd:0,projAtk:pAtk};}
+    case 'heavy':  {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.6+lvl*0.1,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
     default: return base;
   }
 }
@@ -422,7 +428,9 @@ function update(s) {
   else if(right) {h.vx= spd;h.facing= 1;}
   else h.vx*=0.7;
 
-  if(jump&&h.onGround){h.vy=-(8+h.jumpPow*2.5);h.onGround=false;}
+  if(h._jumpSpringTimer>0) h._jumpSpringTimer--;
+  const effJump = h.jumpPow + (h._jumpSpringTimer>0?2:0);
+  if(jump&&h.onGround){h.vy=-(8+effJump*2.5);h.onGround=false;}
   const jpLvl=h.weapons.jetpack.level;
   if(jpLvl>0){
     if(jetKey&&h.jetpackFuel>0){
@@ -442,13 +450,31 @@ function update(s) {
   } else { h.jetting=false; }
 
   const swordLvl=h.weapons.sword.level;
+  const hm=h._hasteMult||1;
   if(atk&&h.attackCooldown<=0){
     h.attackTimer=18;
-    h.attackCooldown=Math.max(8,30-h.atkPow*2-swordLvl*3);
+    h.attackCooldown=Math.max(4,Math.floor((30-h.atkPow*2-swordLvl*3)*hm));
     doHeroAttack(s);
   }
   if(gunKey&&h.weapons.gun.level>0&&h.gunCooldown<=0) shootGun(s);
   if(fbKey&&h.weapons.fireball.level>0&&h.fireballCooldown<=0) throwFireball(s);
+
+  // ---- Orbiting Orbs ----
+  const orbLvl=h.weapons.orbs.level;
+  if(orbLvl>0){
+    const orbCount=orbLvl, orbR=55+orbLvl*6, orbDmg=[0,5,8,12,16,20][orbLvl];
+    for(let i=0;i<orbCount;i++){
+      const ang=(s.frameCount*0.045)+(i/orbCount)*Math.PI*2;
+      const ox=h.x+h.w/2+Math.cos(ang)*orbR, oy=h.y+h.h/2+Math.sin(ang)*orbR;
+      const ob={x:ox-8,y:oy-8,w:16,h:16};
+      for(const e of s.enemies){
+        if(!e.dead&&(e._orbCd||0)<=0&&rectOverlap(e,ob)){
+          damageEnemy(s,e,orbDmg); e._orbCd=30;
+          spawnParticles(s,ox,oy,'#aa44ff',3);
+        }
+      }
+    }
+  }
 
   h.vy+=0.5; h.x+=h.vx; h.y+=h.vy;
   h.onGround=false;
@@ -456,7 +482,8 @@ function update(s) {
 
   for(const p of s.platforms){
     if(p.type==='pit'){
-      if(h.x+h.w>p.x&&h.x<p.x+p.w&&h.y+h.h>GROUND+4) heroHit(s,999);
+      // Grace zone: player must fall 180px below ground before dying — allows jetpack recovery
+      if(h.x+h.w>p.x&&h.x<p.x+p.w&&h.y+h.h>GROUND+180) heroHit(s,999);
       continue;
     }
     if(rectOverlap(h,p)&&h.vy>=0&&h.y+h.h-h.vy<=p.y+2){h.y=p.y-h.h;h.vy=0;h.onGround=true;}
@@ -484,6 +511,8 @@ function update(s) {
     for(let i=seg-1;i<=seg+2;i++){
       if(!s.skySegments.has(i)){s.skySegments.add(i);generateSkyChunk(s,i*600);}
     }
+    // Prune far-behind sky segments to prevent memory leak
+    for(const i of s.skySegments){ if(i<seg-5) s.skySegments.delete(i); }
   }
   if(s.skyAlert>0) s.skyAlert--;
 
@@ -576,7 +605,7 @@ function shootGun(s){
       wtype:'gun', dmg, color:'#ffff88', gravity:0,
     });
   }
-  h.gunCooldown=GUN_CD[lvl];
+  h.gunCooldown=Math.max(4,Math.floor(GUN_CD[lvl]*(state.hero._hasteMult||1)));
   spawnParticles(s,bx,by,'#ffeeaa',3);
 }
 
@@ -590,7 +619,7 @@ function throwFireball(s){
     wtype:'fireball', dmg:FB_DMG[lvl], radius:FB_RADIUS[lvl],
     fireLevel:lvl, color:'#ff6600', gravity:0.05, exploded:false,
   });
-  h.fireballCooldown=FB_CD[lvl];
+  h.fireballCooldown=Math.max(6,Math.floor(FB_CD[lvl]*(state.hero._hasteMult||1)));
 }
 
 function explodeFireball(s,p){
@@ -614,28 +643,27 @@ function explodeFireball(s,p){
 
 function damageEnemy(s,e,dmg){
   const eDef = e.defense || 0;
-  const actual = Math.max(0, dmg - eDef);
+  // Percentage-based mitigation: high defense can't make enemies truly immune
+  const actual = eDef > 0 ? Math.max(1, Math.floor(dmg * 100 / (100 + eDef))) : dmg;
   e.hitTimer = 12;
-  if(actual <= 0){
-    // Immune — blue shield sparks
-    spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#44aaff',5);
-    spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffffff',3);
-    return;
-  }
   e.hp -= actual;
-  spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff4444',5);
+  spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff4444',4);
   if(e.hp<=0){
     e.dead=true; gainXP(s,e.xpVal);
     spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffaa00',12);
-    const coinVal = eDef>=999 ? 50 : 1; // ultra angels drop huge coin stacks
+    const baseVal = eDef>=200 ? 15 : 1;
     const drops=Math.floor(e.xpVal/4);
-    for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:coinVal,collected:false});
+    const coinMult = s._coinMult||1;
+    for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:Math.round(baseVal*coinMult),collected:false});
+    const h=s.hero;
+    if(h._vampirism && Math.random()<0.10){ h.hp=Math.min(h.hp+1,h.maxHp); spawnParticles(s,h.x+h.w/2,h.y,'#ff0055',3); }
   }
 }
 
 function heroHit(s,dmg){
   const h=s.hero;
   if(h.invTimer>0) return;
+  if(h._shield){ h._shield=false; h.invTimer=60; spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#00ccff',10); return; }
   h.hp-=Math.max(1,dmg-h.defense);
   h.invTimer=60;
   spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#ff0000',8);
@@ -646,7 +674,7 @@ function heroHit(s,dmg){
 function gainXP(s,amt){
   const h=s.hero;
   h.xp+=amt*(h._xpMult||1);
-  while(h.xp>=h.xpNext){h.xp-=h.xpNext;h.lvl++;h.xpNext=Math.floor(h.xpNext*1.6);showLevelUp(s);}
+  while(h.xp>=h.xpNext){h.xp-=h.xpNext;h.lvl++;h.xpNext=20+h.lvl*25;showLevelUp(s);}
 }
 
 function updateEnemy(s,e){
@@ -658,6 +686,7 @@ function updateEnemy(s,e){
   e.animTimer++;
   if(e.animTimer>12){e.animFrame=(e.animFrame+1)%2;e.animTimer=0;}
   if(e.hitTimer>0) e.hitTimer--;
+  if(e._orbCd>0) e._orbCd--;
   if(e.type==='angel'){
     e.flySine=(e.flySine||0)+0.04;
     e.y+=Math.sin(e.flySine)*0.8;
@@ -908,6 +937,33 @@ function drawHero(s){
     ctx.fillStyle=fuelPct>0.3?'#00aaff':'#ff6600';
     ctx.fillRect(fbX,fbY,barW*Math.max(0,fuelPct),barH);
   }
+  // Shield indicator
+  if(h._shield){
+    ctx.save(); ctx.globalAlpha=0.55+0.25*Math.sin(s.frameCount*0.2);
+    ctx.strokeStyle='#00ccff'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(h.x+h.w/2,h.y+h.h/2,h.w*0.75,0,Math.PI*2); ctx.stroke();
+    ctx.globalAlpha=1; ctx.restore();
+  }
+  // Orbiting Orbs (drawn in world space, after ctx already untransformed above would be wrong
+  // — these use h.x/h.y directly which are world coords, same as everything else in drawHero)
+  const orbLvl2=h.weapons.orbs.level;
+  if(orbLvl2>0){
+    for(let i=0;i<orbLvl2;i++){
+      const ang=(s.frameCount*0.045)+(i/orbLvl2)*Math.PI*2;
+      const orbR2=55+orbLvl2*6;
+      const ox=h.x+h.w/2+Math.cos(ang)*orbR2, oy=h.y+h.h/2+Math.sin(ang)*orbR2;
+      const gr=ctx.createRadialGradient(ox,oy,0,ox,oy,10+orbLvl2);
+      gr.addColorStop(0,'rgba(255,255,255,0.95)');
+      gr.addColorStop(0.35,'rgba(160,60,255,0.85)');
+      gr.addColorStop(1,'rgba(80,0,200,0)');
+      ctx.fillStyle=gr;
+      ctx.beginPath(); ctx.arc(ox,oy,10+orbLvl2,0,Math.PI*2); ctx.fill();
+      // Trail
+      ctx.globalAlpha=0.3; ctx.fillStyle='#aa44ff';
+      ctx.beginPath(); ctx.arc(ox-Math.cos(ang)*6,oy-Math.sin(ang)*6,6,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
 }
 
 function drawEnemies(s){
@@ -1056,11 +1112,12 @@ function drawHUD(s){
   // Weapon cooldown HUD (top-right of canvas)
   const jpFuelMax=JP_FUEL[h.weapons.jetpack.level]||1;
   const weapons=[
-    {key:'sword',icon:'🗡️',cd:0,maxCd:1,hint:'Z/X'},
-    {key:'gun',  icon:'🔫',cd:h.gunCooldown,maxCd:GUN_CD[h.weapons.gun.level]||38,hint:'C'},
+    {key:'sword',   icon:'🗡️',cd:0,maxCd:1,hint:'Z/X'},
+    {key:'gun',     icon:'🔫',cd:h.gunCooldown,maxCd:GUN_CD[h.weapons.gun.level]||38,hint:'C'},
     {key:'fireball',icon:'🔥',cd:h.fireballCooldown,maxCd:FB_CD[h.weapons.fireball.level]||100,hint:'V'},
-    {key:'jetpack',icon:'🚀',cd:jpFuelMax-h.jetpackFuel,maxCd:jpFuelMax,hint:'J hold'},
-  ].filter(w=>h.weapons[w.key].level>0);
+    {key:'jetpack', icon:'🚀',cd:jpFuelMax-h.jetpackFuel,maxCd:jpFuelMax,hint:'J hold'},
+    {key:'orbs',    icon:'🔮',cd:0,maxCd:1,hint:'auto'},
+  ].filter(w=>h.weapons[w.key]&&h.weapons[w.key].level>0);
 
   let wx=W-8;
   ctx.textAlign='right';
@@ -1132,10 +1189,13 @@ function renderShop(){
   const con=document.getElementById('shop-items');
   con.innerHTML='';
   SHOP_ITEMS.forEach(item=>{
-    const can=state.coinCount>=item.cost;
+    const affordable=state.coinCount>=item.cost;
+    const allowed=!item.canBuy||item.canBuy(state.hero);
+    const can=affordable&&allowed;
     const div=document.createElement('div');
+    const soldOut=!allowed?' <small style="color:#888">(maxed)</small>':'';
     div.className='shop-item'+(can?'':' cant-afford');
-    div.innerHTML=`<div class="s-icon">${item.icon}</div><div class="s-name">${item.name}</div><div class="s-desc">${item.desc}</div><div class="s-cost">🪙 ${item.cost}</div>`;
+    div.innerHTML=`<div class="s-icon">${item.icon}</div><div class="s-name">${item.name}${soldOut}</div><div class="s-desc">${item.desc}</div><div class="s-cost">🪙 ${item.cost}</div>`;
     if(can) div.onclick=()=>{state.coinCount-=item.cost;item.apply(state.hero);renderShop();};
     con.appendChild(div);
   });
