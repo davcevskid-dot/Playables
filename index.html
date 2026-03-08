@@ -138,7 +138,7 @@
   </div>
   <div id="mc-right">
     <button class="mc-btn mc-jump" ontouchstart="mcDown(' ')"  ontouchend="mcUp(' ')"  onmousedown="mcDown(' ')"  onmouseup="mcUp(' ')">↑</button>
-    <button class="mc-btn mc-jet"  ontouchstart="mcDown('j')"  ontouchend="mcUp('j')"  onmousedown="mcDown('j')"  onmouseup="mcUp('j')">🚀</button>
+    <button class="mc-btn mc-jet"  ontouchstart="mcDown('j')"  ontouchend="mcUp('j')"  onmousedown="mcDown('j')"  onmouseup="mcUp('j')">🪽</button>
     <button class="mc-btn mc-atk"  ontouchstart="mcDown('z')"  ontouchend="mcUp('z')"  onmousedown="mcDown('z')"  onmouseup="mcUp('z')">⚔</button>
     <button class="mc-btn mc-gun"  ontouchstart="mcDown('c')"  ontouchend="mcUp('c')"  onmousedown="mcDown('c')"  onmouseup="mcUp('c')">🔫</button>
     <button class="mc-btn mc-fire" ontouchstart="mcDown('v')"  ontouchend="mcUp('v')"  onmousedown="mcDown('v')"  onmouseup="mcUp('v')">🔥</button>
@@ -603,7 +603,7 @@ function update(s) {
 
   for(const p of s.platforms){
     if(p.type==='pit'){
-      // Grace zone: player must fall 180px below ground before dying — allows jetpack recovery
+      // Grace zone: player must fall 180px below ground before dying
       if(h.x+h.w>p.x&&h.x<p.x+p.w&&h.y+h.h>GROUND+180) heroHit(s,999);
       continue;
     }
@@ -613,8 +613,7 @@ function update(s) {
   if(h.x<s.camera+60) h.x=s.camera+60;
   s.camera+=(h.x-(W/gameZoomX)*0.3-s.camera)*0.08;
   const targetCY=h.y+h.h/2-(H/gameZoomY)*0.45;
-  // Dynamic vertical lerp: faster tracking when hero moves fast (jetpack/falling),
-  // prevents hero flying off top/bottom of screen at high JP_VMAX speeds.
+  // Dynamic vertical lerp: faster tracking when hero moves fast (wings/falling).
   const vertLerp=Math.min(0.92,0.1+Math.abs(h.vy)*0.018);
   s.cameraY+=(targetCY-s.cameraY)*vertLerp;
   s.distance=Math.max(s.distance,Math.floor(h.x/10));
@@ -1663,37 +1662,6 @@ function closeShop(){
   if(!state) return;
   state.shopOpen=false; state.paused=false;
   document.getElementById('shop-screen').classList.remove('show');
-}
-
-// ---- Meta Shop ----
-function openMetaShop(){
-  document.getElementById('gameover').style.display='none';
-  document.getElementById('meta-shop').classList.add('show');
-  renderMetaShop();
-}
-
-function renderMetaShop(){
-  const meta=loadMeta();
-  document.getElementById('meta-diamond-count').textContent='💎 Diamonds: '+meta.diamonds;
-  const cont=document.getElementById('meta-items');
-  cont.innerHTML='';
-  META_PERKS.forEach(perk=>{
-    const owned=meta.perks[perk.id]||0;
-    const maxed=owned>=perk.max;
-    const can=!maxed&&meta.diamonds>=perk.cost;
-    const div=document.createElement('div');
-    div.className='shop-item'+(maxed?' maxed':can?'':' cant-afford');
-    const ownedBadge=owned>0?`<span class="wlvl">${owned}/${perk.max}</span>`:'';
-    div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${ownedBadge}</div><div class="s-desc">${perk.desc}</div><div class="s-cost">${maxed?'✓ MAX':'💎 '+perk.cost}</div>`;
-    if(can) div.onclick=()=>{ meta.diamonds-=perk.cost; meta.perks[perk.id]=(meta.perks[perk.id]||0)+1; saveMeta(meta); renderMetaShop(); };
-    cont.appendChild(div);
-  });
-}
-
-function metaContinue(){
-  document.getElementById('meta-shop').classList.remove('show');
-  restartGame(true);
-  if(!gameStarted){ gameStarted=true; loop(); }
 }
 
 function renderShop(){
