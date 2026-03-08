@@ -226,10 +226,10 @@ function getBiome(distance){
 // ---- Dynamic enemy color based on strength ----
 function strengthColor(hp, atk) {
   const str = hp + atk * 14;
-  const t = Math.min(1, str / 500);
-  if(t < 0.33) return rgb(lerpRGB([60,190,50],[220,210,0],t*3.03));
-  if(t < 0.66) return rgb(lerpRGB([220,210,0],[220,90,10],(t-0.33)*3.03));
-  return rgb(lerpRGB([220,90,10],[110,0,50],(t-0.66)*3.03));
+  const t = Math.min(1, str / 150);  // 150 cap = strong contrast across normal play range
+  if(t < 0.33) return rgb(lerpRGB([60,190,50],[230,210,0],t*3.03));
+  if(t < 0.66) return rgb(lerpRGB([230,210,0],[225,80,10],(t-0.33)*3.03));
+  return rgb(lerpRGB([225,80,10],[100,0,55],(t-0.66)*3.03));
 }
 
 // ---- Weapons definition ----
@@ -288,6 +288,8 @@ const SHOP_ITEMS = [
   { icon:'🦘', name:'Jump Springs',  desc:'+2 Jump for 20 seconds',       cost:22,  apply:h=>{ h._jumpSpringTimer=1200; }},
   { icon:'🛡️', name:'Energy Shield', desc:'Negate the next hit taken',    cost:28,  apply:h=>{ h._shield=true; }},
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
+  { icon:'🦅', name:'Double Jump',   desc:'Jump again while in mid-air!',  cost:150, canBuy:h=>!h._doubleJump, apply:h=>{ h._doubleJump=true; }},
+  { icon:'🦋', name:'Triple Jump',   desc:'A third jump — needs Dbl Jump', cost:600, canBuy:h=>h._doubleJump&&!h._tripleJump, apply:h=>{ h._tripleJump=true; }},
 ];
 
 // ---- Upgrade Pool ----
@@ -297,7 +299,7 @@ const UPGRADE_POOL = [
   { icon:'⚡',  name:'Haste',      desc:'-10% weapon cooldowns',            apply:h=>{ h._hasteMult=(h._hasteMult||1)*0.9; }},
   { icon:'🛡️',  name:'Thick Skin', desc:'+1 Defense (cap 8)',               apply:h=>{ h.defense=Math.min(8,h.defense+1); }},
   { icon:'🎯',  name:'Critical Eye',desc:'+10% crit chance (2× dmg)',       apply:h=>{ h._crit=(h._crit||0)+0.10; }},
-  { icon:'🪙',  name:'Scavenger',  desc:'Enemies drop 25% more coins',      apply:(_,s)=>{ s._coinMult=(s._coinMult||1)*1.25; }},
+  { icon:'🪙',  name:'Greedy',     desc:'Instantly gain 100 coins!',         apply:(_,s)=>{ s.coinCount+=100; }},
   { icon:'⭐',  name:'Wisdom',     desc:'+20% XP gain',                     apply:h=>{ h._xpMult=(h._xpMult||1)*1.2; }},
   { icon:'🧛',  name:'Vampirism',  desc:'10% chance to heal 1 HP on kill',  apply:h=>{ h._vampirism=true; }},
 ];
@@ -324,6 +326,7 @@ function createState() {
       weapons:{ sword:{level:0}, gun:{level:0}, fireball:{level:0}, jetpack:{level:0}, orbs:{level:0} },
       gunCooldown:0, fireballCooldown:0, jetpackFuel:0, jetting:false,
       _jumpSpringTimer:0, _shield:false, _speedBootCount:0, _hasteMult:1, _vampirism:false,
+      _doubleJump:false, _tripleJump:false, _jumpsUsed:0, _jumpWasDown:false,
     },
     platforms:[], coins:[], enemies:[], particles:[],
     worldX:0, keys:{}, frameCount:0,
@@ -349,6 +352,11 @@ function generateChunk(s, fromX) {
   if(s.distance>400 && Math.random()<0.3+lvl*0.02){
     const gx=fromX+200+Math.random()*400;
     s.platforms.push({x:gx,y:GROUND+10,w:60+lvl*10,h:12,type:'pit',deadly:true});
+  }
+  // Rare treasure chest (4% per chunk)
+  if(Math.random()<0.04){
+    const tx=fromX+80+Math.random()*640, tv=20+Math.floor(Math.random()*31);
+    s.coins.push({x:tx,y:GROUND-28,w:26,h:22,val:tv,collected:false,isTreasure:true});
   }
   const numE=Math.min(6, Math.floor(1 + density * 160 * diffMult));
   for(let i=0;i<numE;i++){
@@ -430,7 +438,15 @@ function update(s) {
 
   if(h._jumpSpringTimer>0) h._jumpSpringTimer--;
   const effJump = h.jumpPow + (h._jumpSpringTimer>0?2:0);
-  if(jump&&h.onGround){h.vy=-(8+effJump*2.5);h.onGround=false;}
+  const jumpJustPressed = jump && !h._jumpWasDown;
+  h._jumpWasDown = jump;
+  if(h.onGround) h._jumpsUsed = 0;
+  const maxJumps = 1 + (h._doubleJump?1:0) + (h._tripleJump?1:0);
+  if(jumpJustPressed && (h.onGround || h._jumpsUsed < maxJumps)){
+    const power = h._jumpsUsed===0 ? 8+effJump*2.5 : 7+effJump*2.0;
+    h.vy=-(power); h.onGround=false; h._jumpsUsed++;
+    if(h._jumpsUsed>1) spawnParticles(s,h.x+h.w/2,h.y+h.h,'#aaddff',5);
+  }
   const jpLvl=h.weapons.jetpack.level;
   if(jpLvl>0){
     if(jetKey&&h.jetpackFuel>0){
@@ -820,11 +836,34 @@ function drawPlatforms(s,bm){
 
 function drawCoins(s){
   s.coins.forEach(c=>{
-    if(c.x<s.camera-20||c.x>s.camera+W/gameZoomX+20) return;
-    const pulse=0.8+0.2*Math.sin(s.frameCount*0.1+c.x*0.01);
-    ctx.fillStyle=`rgba(255,215,0,${pulse})`;
-    ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2*pulse,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle='#fff8';ctx.lineWidth=1;ctx.stroke();
+    if(c.x<s.camera-30||c.x>s.camera+W/gameZoomX+30) return;
+    if(c.isTreasure){
+      const bob=Math.sin(s.frameCount*0.08+c.x*0.02)*2;
+      const glow=0.5+0.5*Math.sin(s.frameCount*0.12+c.x*0.02);
+      // Glow
+      ctx.save(); ctx.globalAlpha=0.35*glow;
+      ctx.fillStyle='#ffd700';
+      ctx.beginPath();ctx.ellipse(c.x+c.w/2,c.y+c.h/2+bob,c.w,c.h*0.55,0,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1; ctx.restore();
+      // Chest body
+      ctx.fillStyle='#7a3b10'; ctx.fillRect(c.x,c.y+bob+c.h*0.35,c.w,c.h*0.65);
+      // Chest lid
+      ctx.fillStyle='#a0541a'; ctx.fillRect(c.x,c.y+bob,c.w,c.h*0.42);
+      // Lid bump
+      ctx.fillStyle='#b86020'; ctx.fillRect(c.x+2,c.y+bob+1,c.w-4,c.h*0.25);
+      // Gold trim stripe
+      ctx.fillStyle='#ffd700'; ctx.fillRect(c.x,c.y+bob+c.h*0.38,c.w,3);
+      // Gold clasp
+      ctx.fillStyle='#ffe066'; ctx.fillRect(c.x+c.w/2-3,c.y+bob+c.h*0.32,6,6);
+      // Coin value hint
+      ctx.font='bold 8px monospace'; ctx.fillStyle='#fff'; ctx.textAlign='center';
+      ctx.fillText(c.val+'🪙',c.x+c.w/2,c.y+bob-3); ctx.textAlign='left';
+    } else {
+      const pulse=0.8+0.2*Math.sin(s.frameCount*0.1+c.x*0.01);
+      ctx.fillStyle=`rgba(255,215,0,${pulse})`;
+      ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2*pulse,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#fff8';ctx.lineWidth=1;ctx.stroke();
+    }
   });
 }
 
@@ -1058,7 +1097,7 @@ function drawEnemies(s){
     if(e.type==='shooter'){ctx.fillStyle='rgba(255,255,255,0.4)';ctx.beginPath();ctx.moveTo(e.w/2,0);ctx.lineTo(e.w/2+10,-4);ctx.lineTo(e.w/2+10,4);ctx.fill();}
     ctx.restore();
     ctx.fillStyle='#333';ctx.fillRect(e.x-2,e.y-8,e.w+4,4);
-    ctx.fillStyle=['#ee4444','#ee6622','#dd2200','#ff0000'][tier]||'#ee4444';
+    ctx.fillStyle=e.color;
     ctx.fillRect(e.x-2,e.y-8,(e.w+4)*(e.hp/e.maxHp),4);
   }
 }
