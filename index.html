@@ -250,28 +250,28 @@ function strengthColor(hp, atk) {
 // ---- Weapons definition ----
 const WEAPON_DEFS = {
   sword: {
-    icon:'🗡️', name:'Sword', key:'[Z/X]', baseCost: 40,
+    icon:'🗡️', name:'Sword', key:'[Z/X]', baseCost: 75,
     maxLevel: 5,
     descs: ['Wide swing, big range, +4 dmg','Even wider arc, +4 dmg','Hits vertically, +4 dmg','Fast cooldown, +4 dmg','Lightning speed, +4 dmg'],
-    cost: lvl => Math.round(40 * Math.pow(1.7, lvl)),
+    cost: lvl => Math.round(75 * Math.pow(1.9, lvl)),
   },
   gun: {
-    icon:'🔫', name:'Gun', key:'[C]', baseCost: 50,
+    icon:'🔫', name:'Gun', key:'[C]', baseCost: 95,
     maxLevel: 5,
     descs: ['Shoot bullets, 6 dmg','8 dmg, faster reload','Double shot, 10 dmg','Triple shot, 14 dmg','5-bullet burst, 18 dmg'],
-    cost: lvl => Math.round(50 * Math.pow(1.7, lvl)),
+    cost: lvl => Math.round(95 * Math.pow(1.9, lvl)),
   },
   fireball: {
-    icon:'🔥', name:'Fireball', key:'[V]', baseCost: 65,
+    icon:'🔥', name:'Fireball', key:'[V]', baseCost: 120,
     maxLevel: 5,
     descs: ['AOE blast, 8 dmg','Bigger radius, 12 dmg','More damage, 18 dmg','Leaves fire, 25 dmg','Massive AOE, 34 dmg'],
-    cost: lvl => Math.round(65 * Math.pow(1.7, lvl)),
+    cost: lvl => Math.round(120 * Math.pow(1.9, lvl)),
   },
   orbs: {
-    icon:'🔮', name:'Orb Shield', key:'[passive]', baseCost:120,
+    icon:'🔮', name:'Orb Shield', key:'[passive]', baseCost:220,
     maxLevel:5,
     descs:['1 orb rotates around you, 5 dmg','2 orbs, 8 dmg each','3 orbs, 12 dmg each','4 orbs, 16 dmg each','5 orbs, 20 dmg each + bigger'],
-    cost: lvl => Math.round(120 * Math.pow(1.8, lvl)),
+    cost: lvl => Math.round(220 * Math.pow(2.1, lvl)),
   },
 };
 const SWORD_DMG   = [0, 4, 8, 12, 16, 20];
@@ -308,6 +308,9 @@ const SHOP_ITEMS = [
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
   { icon:'🦅', name:'Double Jump',   desc:'Jump again while in mid-air!',  cost:150, canBuy:h=>!h._doubleJump, apply:h=>{ h._doubleJump=true; }},
   { icon:'🦋', name:'Triple Jump',   desc:'A third jump — needs Dbl Jump', cost:600, canBuy:h=>h._doubleJump&&!h._tripleJump, apply:h=>{ h._tripleJump=true; }},
+  { icon:'🛡', name:'Leather Armor', desc:'+1 Defense — reduces damage taken', cost:55,  canBuy:h=>(h._armorTier||0)<1, apply:h=>{ h.defense+=1; h._armorTier=1; }},
+  { icon:'🔰', name:'Iron Armor',    desc:'+2 Defense (requires Leather Armor)', cost:160, canBuy:h=>(h._armorTier||0)>=1&&(h._armorTier||0)<2, apply:h=>{ h.defense+=2; h._armorTier=2; }},
+  { icon:'⚜️', name:'Dragon Armor',  desc:'+3 Defense (requires Iron Armor)',    cost:420, canBuy:h=>(h._armorTier||0)>=2&&(h._armorTier||0)<3, apply:h=>{ h.defense+=3; h._armorTier=3; }},
 ];
 
 // ---- Upgrade Pool ----
@@ -377,6 +380,7 @@ function createState() {
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
     reachedSkyKingdom:false, _coinMult:1, _popups:[],
     bossSpawned:false, diamonds:[],
+    biomeAlert:0, biomeAlertName:'', lastBiomeName:'',
   };
 }
 
@@ -392,6 +396,14 @@ function generateChunk(s, fromX) {
     s.platforms.push({x,y,w,h:16,type:'platform'});
     if(Math.random()<0.7) s.coins.push({x:x+w/2-8,y:y-24,w:16,h:16,val:1,collected:false});
     if(Math.random()<0.4) for(let j=0;j<3;j++) s.coins.push({x:x+j*24,y:y-24,w:16,h:16,val:1,collected:false});
+  }
+  // Upper platform layer (higher elevation, 2–3 smaller platforms per chunk)
+  const numUpper = 1 + Math.floor(Math.random()*2);
+  for(let i=0;i<numUpper;i++){
+    const x=fromX+40+Math.random()*720, y=GROUND-210-Math.random()*100, w=60+Math.random()*80;
+    s.platforms.push({x,y,w,h:14,type:'platform'});
+    if(Math.random()<0.7) for(let j=0;j<2+Math.floor(Math.random()*3);j++)
+      s.coins.push({x:x+j*28,y:y-22,w:16,h:16,val:2,collected:false});
   }
   for(let i=0;i<5;i++) if(Math.random()<0.5) s.coins.push({x:fromX+Math.random()*800,y:GROUND-24,w:16,h:16,val:1,collected:false});
   if(s.distance>400 && Math.random()<0.3+lvl*0.02){
@@ -414,7 +426,7 @@ function generateChunk(s, fromX) {
   }
   // Purple Diamond (~1.5% per chunk)
   if(Math.random()<0.015){
-    s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-32,w:20,h:20,collected:false});
+    s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-34,w:28,h:28,collected:false});
   }
   // Dragon Boss — spawns once at biome 14 (~7000m)
   if(!s.bossSpawned && s.distance>=7000 && fromX>=7200){
@@ -426,8 +438,8 @@ function generateChunk(s, fromX) {
       color:'#cc2200',defense:0,flySine:0,_orbCd:0,_breathCd:0,_wingFlap:0,
       patrolDir:-1,patrolTimer:0,
     });
-    s.diamonds.push({x:fromX+500,y:GROUND-32,w:20,h:20,collected:false});
-    s.diamonds.push({x:fromX+560,y:GROUND-32,w:20,h:20,collected:false});
+    s.diamonds.push({x:fromX+500,y:GROUND-34,w:28,h:28,collected:false});
+    s.diamonds.push({x:fromX+560,y:GROUND-34,w:28,h:28,collected:false});
   }
   const numE=Math.min(6, Math.floor(1 + density * 160 * diffMult));
   for(let i=0;i<numE;i++){
@@ -456,11 +468,11 @@ function spawnEnemy(x,type,lvl,diff,dist){
     case 'walker': {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.5)*diff));return{...base,hp,maxHp:hp,atk,speed:1+lvl*0.15,xpVal:Math.floor((4+lvl*2)*xpMult),color:strengthColor(hp,atk)};}
     case 'jumper': {const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.7)*diff));return{...base,hp,maxHp:hp,atk,speed:1.5+lvl*0.2,xpVal:Math.floor((6+lvl*2)*xpMult),color:strengthColor(hp,atk),w:24,h:28,jumpCd:0};}
     case 'shooter':{const hp=2+lvl,pAtk=Math.max(1,Math.floor((1+lvl*0.6)*diff));return{...base,hp,maxHp:hp,atk:0,speed:0.4,xpVal:Math.floor((8+lvl*3)*xpMult),color:strengthColor(hp,pAtk),shootCd:0,projAtk:pAtk};}
-    case 'heavy':   {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.6+lvl*0.1,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
-    case 'horned':  {const hp=4+lvl,atk=Math.max(2,Math.floor((2+lvl*0.8)*diff));return{...base,hp,maxHp:hp,atk,speed:1.3+lvl*0.15,xpVal:Math.floor((7+lvl*2)*xpMult),color:strengthColor(hp,atk),w:32,h:32,chargeTimer:0};}
+    case 'heavy':   {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.4+lvl*0.06,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
+    case 'horned':  {const hp=4+lvl,atk=Math.max(2,Math.floor((2+lvl*0.8)*diff));return{...base,hp,maxHp:hp,atk,speed:0.85+lvl*0.09,xpVal:Math.floor((7+lvl*2)*xpMult),color:strengthColor(hp,atk),w:32,h:32,chargeTimer:0};}
     case 'poisoner':{const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.4)*diff));return{...base,hp,maxHp:hp,atk,speed:1.2+lvl*0.1,xpVal:Math.floor((9+lvl*2)*xpMult),color:'#44cc44',w:26,h:30,_poisonAtk:true};}
-    case 'large':   {const hp=20+lvl*4,atk=Math.max(2,Math.floor((2+lvl*1.2)*diff));return{...base,hp,maxHp:hp,atk,speed:0.5+lvl*0.05,xpVal:Math.floor((18+lvl*5)*xpMult),color:strengthColor(hp,atk),w:52,h:52};}
-    case 'fast':    {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.3)*diff));return{...base,hp,maxHp:hp,atk,speed:3.5+lvl*0.3,xpVal:Math.floor((8+lvl*2)*xpMult),color:'#ffcc00',w:20,h:26};}
+    case 'large':   {const hp=20+lvl*4,atk=Math.max(2,Math.floor((2+lvl*1.2)*diff));return{...base,hp,maxHp:hp,atk,speed:0.32+lvl*0.03,xpVal:Math.floor((18+lvl*5)*xpMult),color:strengthColor(hp,atk),w:52,h:52};}
+    case 'fast':    {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.3)*diff));return{...base,hp,maxHp:hp,atk,speed:2.8+lvl*0.18,xpVal:Math.floor((8+lvl*2)*xpMult),color:'#ffcc00',w:20,h:26};}
     default: return base;
   }
 }
@@ -725,6 +737,9 @@ function update(s) {
   s._popups=s._popups.filter(p=>p.life>0);
 
   const bm=getBiome(s.distance);
+  if(s.lastBiomeName && bm.name!==s.lastBiomeName){ s.biomeAlert=200; s.biomeAlertName=bm.name; }
+  s.lastBiomeName=bm.name;
+  if(s.biomeAlert>0) s.biomeAlert--;
   document.getElementById('ui-lvl').textContent=h.lvl;
   document.getElementById('ui-xp').textContent=Math.floor(h.xp);
   document.getElementById('ui-xnxt').textContent=h.xpNext;
@@ -995,7 +1010,7 @@ function updateEnemy(s,e){
     case 'horned':
       if(aggro){
         e.facing=dir; e.chargeTimer=(e.chargeTimer||0)-1;
-        if(e.chargeTimer<=0&&absDist<180&&!frozen){e.vx=dir*effSpd*3.5;e.chargeTimer=90;}
+        if(e.chargeTimer<=0&&absDist<180&&!frozen){e.vx=dir*effSpd*2.2;e.chargeTimer=90;}
         else e.vx=dir*effSpd;
         e.x+=e.vx;
         if(absDist<42&&Math.abs(h.y-e.y)<e.h&&h.invTimer<=0) heroHit(s,e.atk*2);
@@ -1619,6 +1634,21 @@ function drawHUD(s){
   }
   ctx.textAlign='left';
 
+  // Biome entry notification (top of screen)
+  if(s.biomeAlert>0){
+    const a=Math.min(1,s.biomeAlert/40)*Math.min(1,(s.biomeAlert)/200*4);
+    const slideY=Math.max(0,(1-(s.biomeAlert/200))*-20+(s.biomeAlert<40?(40-s.biomeAlert)/40*-20:0));
+    ctx.save(); ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(10,10,30,0.82)';
+    ctx.fillRect(W/2-140,4+slideY,280,34);
+    ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.5;
+    ctx.strokeRect(W/2-140,4+slideY,280,34);
+    ctx.fillStyle='#ffd700'; ctx.font='bold 13px monospace'; ctx.textAlign='center';
+    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,16+slideY);
+    ctx.fillStyle='#aaa'; ctx.font='9px monospace';
+    ctx.fillText('NEW BIOME',W/2,29+slideY);
+    ctx.textAlign='left'; ctx.restore();
+  }
   // Sky Kingdom alert
   if(s.skyAlert>0){
     const a=Math.min(1,s.skyAlert/60);
