@@ -62,6 +62,22 @@
   #gameover h2 { color: #e55; font-size: 32px; margin-bottom: 12px; }
   #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; font-family: monospace; }
 
+  /* ---- Achievements ---- */
+  #ach-screen { background: rgba(8,4,24,0.97); }
+  #ach-screen h2 { color: #ffd700; font-size: 22px; margin-bottom: 2px; }
+  .ach-grid { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 740px; max-height: 68vh; overflow-y: auto; padding: 4px 2px; }
+  .ach-card { width: 118px; min-height: 96px; background: rgba(255,255,255,0.07); border: 1.5px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 8px 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .ach-card.unlocked { border-color: #ffd700; background: rgba(255,215,0,0.1); }
+  .ach-card .ach-icon { font-size: 26px; line-height: 1; }
+  .ach-card.locked .ach-icon { filter: grayscale(1); opacity: 0.35; }
+  .ach-card .ach-name { font-size: 11px; font-weight: bold; color: #ffd700; line-height: 1.2; }
+  .ach-card.locked .ach-name { color: #444; }
+  .ach-card .ach-desc { font-size: 9px; color: #888; line-height: 1.3; }
+  .ach-card.unlocked .ach-desc { color: #aaa; }
+  .ach-card .ach-reward { font-size: 10px; color: #cc88ff; margin-top: 2px; }
+  .ach-menu-btn { margin-top: 8px; padding: 9px 32px; font-size: 14px; background: rgba(80,40,180,0.25); border: 1.5px solid rgba(150,100,255,0.4); border-radius: 8px; color: #cc88ff; cursor: pointer; font-family: monospace; transition: background 0.1s; }
+  .ach-menu-btn:hover { background: rgba(100,60,200,0.4); }
+
   /* ---- Mobile Controls ---- */
   #mobile-controls {
     display: flex; justify-content: space-between; align-items: center;
@@ -150,6 +166,7 @@
   <h1>⚔️ FORWARD!</h1>
   <p class="menu-sub">Side-scrolling survival platformer</p>
   <button class="start-btn" onclick="startGame(false)">▶ START NEW GAME</button>
+  <button class="ach-menu-btn" onclick="openAchievements()">🏆 Achievements</button>
   <button class="start-btn" id="continue-btn" onclick="startGame(true)" style="background:#2255aa;margin-top:8px">↩ CONTINUE</button>
   <div class="controls-info">
     <b>Move:</b> Arrow keys / WASD &nbsp;|&nbsp; <b>Jump:</b> Space / ↑<br>
@@ -193,6 +210,13 @@
   </div>
 </div>
 
+<div id="ach-screen" class="overlay">
+  <h2>🏆 Achievements</h2>
+  <p id="ach-count" style="color:#aaa;font-size:12px;margin-bottom:10px"></p>
+  <div class="ach-grid" id="ach-grid"></div>
+  <button onclick="closeAchievements()" style="margin-top:14px;padding:8px 26px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;font-size:13px;cursor:pointer;font-family:monospace">✕ Close</button>
+</div>
+
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -225,6 +249,91 @@ const BIOMES = [
   { name:'Rainbow Land',   sky0:[200,0,100],   sky1:[100,0,200],  gnd:[200,100,0],   gndA:[255,220,0],  plt:[0,180,100],  pltA:[0,120,255],  bg:[255,100,200],bgA:0.40 },
   { name:'Shadow Realm',   sky0:[0,0,0],       sky1:[8,0,8],      gnd:[10,0,10],     gndA:[26,0,26],    plt:[22,0,22],    pltA:[44,0,44],    bg:[50,0,50],    bgA:0.60 },
 ];
+// ---- Achievements ----
+const ACHIEVEMENTS = [
+  // Biome discoveries (indices match BIOMES 0-14)
+  {id:'b_plains',   icon:'🌿', name:'Plains Walker',     desc:'Reach the Plains',            cat:'biome'},
+  {id:'b_mountain', icon:'⛰️', name:'Mountain Climber',  desc:'Reach the Mountain',          cat:'biome'},
+  {id:'b_jungle',   icon:'🌴', name:'Jungle Explorer',   desc:'Reach the Jungle',            cat:'biome'},
+  {id:'b_volcano',  icon:'🌋', name:'Volcano Diver',     desc:'Enter the Volcano',           cat:'biome'},
+  {id:'b_snow',     icon:'❄️', name:'Frost Walker',      desc:'Survive the Snow',            cat:'biome'},
+  {id:'b_beach',    icon:'🏖️', name:'Beach Bum',         desc:'Reach the Beach',             cat:'biome'},
+  {id:'b_fantasy',  icon:'✨', name:'Fantasy Realm',     desc:'Reach the Fantasy biome',     cat:'biome'},
+  {id:'b_mushroom', icon:'🍄', name:'Shroom Hopper',     desc:'Reach the Mushroom Kingdom',  cat:'biome'},
+  {id:'b_space',    icon:'🚀', name:'Space Explorer',    desc:'Reach Space',                 cat:'biome'},
+  {id:'b_desert',   icon:'🏜️', name:'Desert Nomad',      desc:'Survive the Desert',          cat:'biome'},
+  {id:'b_crystal',  icon:'💎', name:'Crystal Spelunker', desc:'Reach the Crystal Cave',      cat:'biome'},
+  {id:'b_haunted',  icon:'👻', name:'Haunted',           desc:'Dare the Haunted Forest',     cat:'biome'},
+  {id:'b_lava',     icon:'🔥', name:'Lava Surfer',       desc:'Reach the Lava World',        cat:'biome'},
+  {id:'b_ice',      icon:'🧊', name:'Ice Caver',         desc:'Reach the Ice Cave',          cat:'biome'},
+  {id:'b_cyber',    icon:'🤖', name:'Cyber Runner',      desc:'Reach Cyber City',            cat:'biome'},
+  // Run milestones
+  {id:'dist_500',  icon:'🗺️', name:'500m Milestone', desc:'Run 500 meters',              cat:'run'},
+  {id:'dist_2k',   icon:'🧭', name:'2km Explorer',   desc:'Run 2000 meters',             cat:'run'},
+  {id:'dist_5k',   icon:'🏆', name:'5km Legend',     desc:'Run 5000 meters',             cat:'run'},
+  {id:'lvl_5',     icon:'⭐', name:'Level 5',        desc:'Reach level 5 in a run',      cat:'run'},
+  {id:'lvl_10',    icon:'🌟', name:'Level 10',       desc:'Reach level 10 in a run',     cat:'run'},
+  {id:'first_run', icon:'🎮', name:'First Run',      desc:'Complete your first run',     cat:'run'},
+  {id:'sky',       icon:'☁️', name:'Ascension',      desc:'Reach the Sky Kingdom',       cat:'run'},
+  // Combat
+  {id:'kill_10',   icon:'⚔️', name:'Warrior',        desc:'Kill 10 enemies in a run',    cat:'combat'},
+  {id:'kill_50',   icon:'🗡️', name:'Veteran',        desc:'Kill 50 enemies in a run',    cat:'combat'},
+  {id:'kill_100',  icon:'💥', name:'Unstoppable',    desc:'Kill 100 enemies in a run',   cat:'combat'},
+  {id:'boss_kill', icon:'🐉', name:'Dragon Slayer',  desc:'Defeat the Dragon Boss',      cat:'combat'},
+  // Wealth
+  {id:'coins_100', icon:'🪙', name:'Coin Collector', desc:'Collect 100 coins in a run',  cat:'coins'},
+  {id:'coins_500', icon:'💰', name:'Wealthy',        desc:'Collect 500 coins in a run',  cat:'coins'},
+];
+const _BIOME_ACH_IDS=['b_plains','b_mountain','b_jungle','b_volcano','b_snow','b_beach','b_fantasy','b_mushroom','b_space','b_desert','b_crystal','b_haunted','b_lava','b_ice','b_cyber'];
+
+function checkAchievements(s){
+  const meta=loadMeta();
+  if(!meta.achievements) meta.achievements=[];
+  const unlocked=new Set(meta.achievements);
+  const newOnes=[];
+  const chk=(id,cond)=>{ if(cond&&!unlocked.has(id)){ unlocked.add(id); newOnes.push(id); } };
+  // Biome
+  const visited=s._visitedBiomes||new Set();
+  BIOMES.slice(0,15).forEach((bm,i)=>chk(_BIOME_ACH_IDS[i],visited.has(bm.name)));
+  // Run milestones
+  chk('dist_500',s.distance>=500); chk('dist_2k',s.distance>=2000); chk('dist_5k',s.distance>=5000);
+  chk('lvl_5',s.hero.lvl>=5); chk('lvl_10',s.hero.lvl>=10);
+  chk('first_run',!!s.dead); chk('sky',!!s.reachedSkyKingdom);
+  // Combat
+  chk('kill_10',(s._killCount||0)>=10); chk('kill_50',(s._killCount||0)>=50); chk('kill_100',(s._killCount||0)>=100);
+  chk('boss_kill',!!s._bossKilled);
+  // Wealth
+  chk('coins_100',s.coinCount>=100); chk('coins_500',s.coinCount>=500);
+  if(newOnes.length>0){
+    meta.achievements=[...unlocked];
+    meta.diamonds=(meta.diamonds||0)+newOnes.length;
+    saveMeta(meta);
+    if(!s.dead){
+      newOnes.forEach(id=>{
+        const ach=ACHIEVEMENTS.find(a=>a.id===id);
+        if(ach) s._achNotifQueue.push({...ach,timer:200});
+      });
+    }
+  }
+}
+
+function openAchievements(){ renderAchievements(); document.getElementById('ach-screen').classList.add('show'); }
+function closeAchievements(){ document.getElementById('ach-screen').classList.remove('show'); }
+function renderAchievements(){
+  const meta=loadMeta();
+  const unlocked=new Set(meta.achievements||[]);
+  document.getElementById('ach-count').textContent=`${unlocked.size} / ${ACHIEVEMENTS.length} unlocked  ·  💎 ${meta.diamonds||0} diamonds earned`;
+  const grid=document.getElementById('ach-grid');
+  grid.innerHTML='';
+  ACHIEVEMENTS.forEach(a=>{
+    const ok=unlocked.has(a.id);
+    const div=document.createElement('div');
+    div.className='ach-card '+(ok?'unlocked':'locked');
+    div.innerHTML=`<div class="ach-icon">${a.icon}</div><div class="ach-name">${a.name}</div><div class="ach-desc">${a.desc}</div>${ok?'<div class="ach-reward">+💎 earned</div>':''}`;
+    grid.appendChild(div);
+  });
+}
+
 function lerpRGB(a,b,t){return[Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b[1]-a[1])*t),Math.round(a[2]+(b[2]-a[2])*t)];}
 function rgb(a){return`rgb(${a[0]},${a[1]},${a[2]})`;}
 function rgba(a,al){return`rgba(${a[0]},${a[1]},${a[2]},${al})`;}
@@ -308,13 +417,12 @@ const SHOP_ITEMS = [
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
   { icon:'🦅', name:'Double Jump',   desc:'Jump again while in mid-air!',  cost:150, canBuy:h=>!h._doubleJump, apply:h=>{ h._doubleJump=true; }},
   { icon:'🦋', name:'Triple Jump',   desc:'A third jump — needs Dbl Jump', cost:600, canBuy:h=>h._doubleJump&&!h._tripleJump, apply:h=>{ h._tripleJump=true; }},
-  // Single upgradeable shield — cost and description scale with tier
+  // Single upgradeable shield — cost escalates +33% per tier, no cap
   {
-    icon: h=>['🛡','🛡️','🔰','⚜️','👑'][(h._shieldTier||0)],
-    name: h=>`Shield Upgrade ${(h._shieldTier||0)<5?`(Tier ${(h._shieldTier||0)+1}/5)`:'(MAX)'}`,
+    icon: h=>['🛡','🛡️','🔰','⚜️','👑','🏆'][(h._shieldTier||0)%6],
+    name: h=>`Shield Upgrade (Tier ${(h._shieldTier||0)+1})`,
     desc: h=>`+1 Defense per upgrade. DEF now: ${h.defense}`,
-    cost: h=>[55,130,280,520,900][(h._shieldTier||0)],
-    canBuy: h=>(h._shieldTier||0)<5,
+    cost: h=>Math.round(55*Math.pow(1.33,(h._shieldTier||0))),
     apply: h=>{ h.defense+=1; h._shieldTier=(h._shieldTier||0)+1; },
   },
 ];
@@ -387,6 +495,7 @@ function createState() {
     reachedSkyKingdom:false, _coinMult:1, _popups:[],
     bossSpawned:false, diamonds:[],
     biomeAlert:0, biomeAlertName:'', lastBiomeName:'',
+    _visitedBiomes:new Set(), _killCount:0, _bossKilled:false, _achNotifQueue:[],
   };
 }
 
@@ -767,8 +876,11 @@ function update(s) {
   s._popups=s._popups.filter(p=>p.life>0);
 
   const bm=getBiome(s.distance);
+  if(!s._visitedBiomes) s._visitedBiomes=new Set();
+  s._visitedBiomes.add(bm.name);
   if(s.lastBiomeName && bm.name!==s.lastBiomeName){ s.biomeAlert=200; s.biomeAlertName=bm.name; }
   s.lastBiomeName=bm.name;
+  if(s.frameCount%90===0) checkAchievements(s);
   if(s.biomeAlert>0) s.biomeAlert--;
   document.getElementById('ui-lvl').textContent=h.lvl;
   document.getElementById('ui-xp').textContent=Math.floor(h.xp);
@@ -922,6 +1034,8 @@ function damageEnemy(s,e,dmg){
   spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff4444',4);
   if(e.hp<=0){
     e.dead=true; gainXP(s,e.xpVal);
+    s._killCount=(s._killCount||0)+1;
+    if(e.type==='dragon') s._bossKilled=true;
     spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffaa00',12);
     const baseVal = eDef>=200 ? 15 : 1;
     const drops=Math.floor(e.xpVal/4);
@@ -2046,12 +2160,12 @@ function drawHUD(s){
     const fadeIn=Math.min(1,elapsed/12);
     const fadeOut=s.biomeAlert<40?s.biomeAlert/40:1;
     const a=fadeIn*fadeOut;
-    const bw=Math.min(W*0.9,Math.max(260,Math.round(W*0.72)));
-    const bh=Math.max(38,Math.round(W*0.075));
-    const bfMain=Math.max(12,Math.round(W*0.023));
-    const bfSub=Math.max(8,Math.round(W*0.014));
+    const bw=Math.min(W,Math.round(340*sc));
+    const bh=Math.round(52*sc);
+    const bfMain=Math.round(15*sc);
+    const bfSub=Math.round(10*sc);
     const slideOff=Math.round(Math.max(0,1-elapsed/12)*-(bh+8));
-    const ny=6+slideOff;
+    const ny=Math.round(6*sc)+slideOff;
     ctx.save();ctx.globalAlpha=a;
     ctx.fillStyle='rgba(8,6,20,0.88)';
     ctx.fillRect(W/2-bw/2,ny,bw,bh);
@@ -2063,6 +2177,36 @@ function drawHUD(s){
     ctx.fillText('NEW BIOME',W/2,ny+Math.round(bh*0.82));
     ctx.textAlign='left';ctx.restore();
   }
+  // In-game achievement unlock notification (slides up from bottom)
+  if(s._achNotifQueue&&s._achNotifQueue.length>0){
+    const ach=s._achNotifQueue[0];
+    ach.timer--;
+    if(ach.timer<=0){ s._achNotifQueue.shift(); }
+    else{
+      const elapsed2=200-ach.timer;
+      const a2=Math.min(1,elapsed2/10)*Math.min(1,ach.timer/25);
+      const aw=Math.round(285*sc),ah=Math.round(46*sc);
+      const ax=Math.round((W-aw)/2);
+      const slideUp=Math.round(Math.max(0,1-elapsed2/10)*(ah+10));
+      const ay=H-Math.round(12*sc)-ah+slideUp;
+      ctx.save();ctx.globalAlpha=a2;
+      ctx.fillStyle='rgba(10,5,28,0.92)';
+      ctx.fillRect(ax,ay,aw,ah);
+      ctx.strokeStyle='#cc88ff';ctx.lineWidth=Math.max(1,Math.round(1.5*sc));
+      ctx.strokeRect(ax,ay,aw,ah);
+      ctx.font=`${Math.round(20*sc)}px serif`;ctx.textAlign='left';
+      ctx.fillStyle='#fff';
+      ctx.fillText(ach.icon,ax+Math.round(8*sc),ay+Math.round(ah*0.7));
+      ctx.fillStyle='#cc88ff';ctx.font=`bold ${Math.round(9*sc)}px monospace`;
+      ctx.fillText('ACHIEVEMENT UNLOCKED',ax+Math.round(36*sc),ay+Math.round(ah*0.38));
+      ctx.fillStyle='#ffd700';ctx.font=`bold ${Math.round(13*sc)}px monospace`;
+      ctx.fillText(ach.name,ax+Math.round(36*sc),ay+Math.round(ah*0.72));
+      ctx.fillStyle='#aa77ff';ctx.font=`${Math.round(10*sc)}px monospace`;ctx.textAlign='right';
+      ctx.fillText('+1 💎',ax+aw-Math.round(8*sc),ay+Math.round(ah*0.56));
+      ctx.textAlign='left';ctx.restore();
+    }
+  }
+
   // Sky Kingdom alert
   if(s.skyAlert>0){
     const a=Math.min(1,s.skyAlert/60);
@@ -2174,6 +2318,7 @@ function renderShop(){
 
 // ---- Game Over ----
 function showGameOver(s){
+  checkAchievements(s);
   document.getElementById('go-stats').innerHTML=`Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount}`;
   const meta=loadMeta();
   document.getElementById('go-diamonds').textContent='💎 Total Diamonds: '+meta.diamonds;
@@ -2228,7 +2373,7 @@ let gameStarted = false;
 function startGame(continueRun){
   document.getElementById('main-menu').classList.remove('show');
   document.getElementById('meta-shop').classList.remove('show');
-  if(!continueRun){ saveMeta({diamonds:0,perks:{}}); }
+  if(!continueRun){ const _m=loadMeta(); saveMeta({diamonds:0,perks:{},achievements:_m.achievements||[]}); }
   restartGame(continueRun);
   if(!gameStarted){ gameStarted=true; loop(); }
 }
