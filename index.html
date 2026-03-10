@@ -308,9 +308,15 @@ const SHOP_ITEMS = [
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
   { icon:'🦅', name:'Double Jump',   desc:'Jump again while in mid-air!',  cost:150, canBuy:h=>!h._doubleJump, apply:h=>{ h._doubleJump=true; }},
   { icon:'🦋', name:'Triple Jump',   desc:'A third jump — needs Dbl Jump', cost:600, canBuy:h=>h._doubleJump&&!h._tripleJump, apply:h=>{ h._tripleJump=true; }},
-  { icon:'🛡', name:'Leather Armor', desc:'+1 Defense — reduces damage taken', cost:55,  canBuy:h=>(h._armorTier||0)<1, apply:h=>{ h.defense+=1; h._armorTier=1; }},
-  { icon:'🔰', name:'Iron Armor',    desc:'+2 Defense (requires Leather Armor)', cost:160, canBuy:h=>(h._armorTier||0)>=1&&(h._armorTier||0)<2, apply:h=>{ h.defense+=2; h._armorTier=2; }},
-  { icon:'⚜️', name:'Dragon Armor',  desc:'+3 Defense (requires Iron Armor)',    cost:420, canBuy:h=>(h._armorTier||0)>=2&&(h._armorTier||0)<3, apply:h=>{ h.defense+=3; h._armorTier=3; }},
+  // Single upgradeable shield — cost and description scale with tier
+  {
+    icon: h=>['🛡','🛡️','🔰','⚜️','👑'][(h._shieldTier||0)],
+    name: h=>`Shield Upgrade ${(h._shieldTier||0)<5?`(Tier ${(h._shieldTier||0)+1}/5)`:'(MAX)'}`,
+    desc: h=>`+1 Defense per upgrade. DEF now: ${h.defense}`,
+    cost: h=>[55,130,280,520,900][(h._shieldTier||0)],
+    canBuy: h=>(h._shieldTier||0)<5,
+    apply: h=>{ h.defense+=1; h._shieldTier=(h._shieldTier||0)+1; },
+  },
 ];
 
 // ---- Upgrade Pool ----
@@ -405,18 +411,18 @@ function generateChunk(s, fromX) {
     if(Math.random()<0.7) for(let j=0;j<2+Math.floor(Math.random()*3);j++)
       s.coins.push({x:x+j*28,y:y-22,w:16,h:16,val:2,collected:false});
   }
-  // Layer 3: high platforms (360–460 above ground, ~60% chance, smaller)
+  // Layer 3: high platforms — always 1 per chunk (360–460 above ground)
   const highPlats=[];
-  if(Math.random()<0.6){
+  {
     const x=fromX+60+Math.random()*700, y=GROUND-360-Math.random()*100, w=50+Math.random()*60;
     s.platforms.push({x,y,w,h:13,type:'platform'});
     highPlats.push({x,y,w});
     for(let j=0;j<2+Math.floor(Math.random()*3);j++)
       s.coins.push({x:x+j*24,y:y-22,w:16,h:16,val:3,collected:false});
   }
-  // Layer 4: summit platforms (520–620 above ground, ~35% chance, rarest)
+  // Layer 4: summit platforms — always 1 per chunk (520–620 above ground)
   const topPlats=[];
-  if(Math.random()<0.35){
+  {
     const x=fromX+80+Math.random()*680, y=GROUND-520-Math.random()*100, w=45+Math.random()*50;
     s.platforms.push({x,y,w,h:12,type:'platform'});
     topPlats.push({x,y,w});
@@ -633,12 +639,14 @@ function update(s) {
 
   h.vy+=0.5; h.x+=h.vx; h.y+=h.vy;
   h.onGround=false;
-  if(h.y+h.h>=GROUND){h.y=GROUND-h.h;h.vy=0;h.onGround=true;}
+  // Skip solid-ground if player is directly over a pit (let them fall through)
+  const overPit=s.platforms.some(p=>p.type==='pit'&&h.x+h.w>p.x&&h.x<p.x+p.w);
+  if(!overPit&&h.y+h.h>=GROUND){h.y=GROUND-h.h;h.vy=0;h.onGround=true;}
 
   for(const p of s.platforms){
     if(p.type==='pit'){
-      // Grace zone: player must fall 180px below ground before dying
-      if(h.x+h.w>p.x&&h.x<p.x+p.w&&h.y+h.h>GROUND+180) heroHit(s,999);
+      // Instant death once hero falls 30px below ground into the pit
+      if(h.x+h.w>p.x&&h.x<p.x+p.w&&h.y+h.h>GROUND+30) heroHit(s,999);
       continue;
     }
     if(rectOverlap(h,p)&&h.vy>=0&&h.y+h.h-h.vy<=p.y+2){h.y=p.y-h.h;h.vy=0;h.onGround=true;}
@@ -1989,8 +1997,9 @@ function drawHUD(s){
     {key:'fireball',icon:'🔥',cd:h.fireballCooldown,maxCd:FB_CD[h.weapons.fireball.level]||100,hint:'V'},
     {key:'orbs',    icon:'🔮',cd:0,maxCd:1,hint:'auto'},
   ].filter(w=>h.weapons[w.key]&&h.weapons[w.key].level>0);
-  // Responsive scale: keeps icons small on 720-wide canvas, scales up on larger (high-dpi phone)
-  const sc=Math.max(1,W/720);
+  // Responsive scale: gameZoomX = W/cssW so 1 canvas-px = 1 physical CSS-px on reference screen.
+  // Multiplying by gameZoomX makes canvas elements appear the same size regardless of device.
+  const sc=Math.max(1,gameZoomX);
   const iSz=Math.round(18*sc);  // icon font px
   const hSz=Math.round(9*sc);   // hint font px
   const barW0=Math.round(22*sc),barH0=Math.round(Math.max(3,3*sc));
@@ -2105,14 +2114,19 @@ function renderShop(){
   const con=document.getElementById('shop-items');
   con.innerHTML='';
   SHOP_ITEMS.forEach(item=>{
-    const affordable=state.coinCount>=item.cost;
-    const allowed=!item.canBuy||item.canBuy(state.hero);
+    const h=state.hero;
+    const cost=typeof item.cost==='function'?item.cost(h):item.cost;
+    const desc=typeof item.desc==='function'?item.desc(h):item.desc;
+    const name=typeof item.name==='function'?item.name(h):item.name;
+    const icon=typeof item.icon==='function'?item.icon(h):item.icon;
+    const affordable=state.coinCount>=cost;
+    const allowed=!item.canBuy||item.canBuy(h);
     const can=affordable&&allowed;
     const div=document.createElement('div');
     const soldOut=!allowed?' <small style="color:#888">(maxed)</small>':'';
     div.className='shop-item'+(can?'':' cant-afford');
-    div.innerHTML=`<div class="s-icon">${item.icon}</div><div class="s-name">${item.name}${soldOut}</div><div class="s-desc">${item.desc}</div><div class="s-cost">🪙 ${item.cost}</div>`;
-    if(can) div.onclick=()=>{state.coinCount-=item.cost;item.apply(state.hero);renderShop();};
+    div.innerHTML=`<div class="s-icon">${icon}</div><div class="s-name">${name}${soldOut}</div><div class="s-desc">${desc}</div><div class="s-cost">🪙 ${cost}</div>`;
+    if(can) div.onclick=()=>{state.coinCount-=cost;item.apply(h);renderShop();};
     con.appendChild(div);
   });
   // Weapons
