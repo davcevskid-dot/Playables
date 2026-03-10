@@ -1044,6 +1044,7 @@ function draw(s){
   ctx.translate(-s.camera,-s.cameraY);
   const bm=getBiome(s.distance);
   drawBackground(s,bm);
+  drawBiomeDecorations(s,bm);
   drawPlatforms(s,bm);
   drawDiamonds(s);
   drawCoins(s);
@@ -1097,6 +1098,361 @@ function drawBackground(s,bm){
     ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(s.camera-10,GROUND,VW+20,cy+VH-GROUND+10);
     ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(s.camera-10,GROUND,VW+20,8);
   }
+}
+
+function drawBiomeDecorations(s,bm){
+  const VW=W/gameZoomX, t=s.frameCount, cx=s.camera;
+  const name=bm.name;
+  ctx.save();
+
+  if(name==='Plains'){
+    // Grass tufts scattered in BG
+    ctx.fillStyle='rgba(55,105,35,0.38)';
+    for(let i=0;i<14;i++){
+      const hx=((cx*0.38+i*118)%(VW+160))+cx-80;
+      ctx.beginPath();ctx.moveTo(hx-5,GROUND);ctx.lineTo(hx,GROUND-18);ctx.lineTo(hx+5,GROUND);ctx.fill();
+      ctx.beginPath();ctx.moveTo(hx+5,GROUND);ctx.lineTo(hx+10,GROUND-13);ctx.lineTo(hx+15,GROUND);ctx.fill();
+      ctx.beginPath();ctx.moveTo(hx-14,GROUND);ctx.lineTo(hx-9,GROUND-15);ctx.lineTo(hx-4,GROUND);ctx.fill();
+    }
+  }
+
+  else if(name==='Mountain'){
+    // Rocky peaks in BG
+    for(let i=0;i<5;i++){
+      const hx=((cx*0.16+i*250)%(VW+320))+cx-160;
+      const ph=90+(i*41)%65;
+      ctx.fillStyle='rgba(58,60,68,0.38)';
+      ctx.beginPath();ctx.moveTo(hx-72,GROUND);ctx.lineTo(hx,GROUND-ph);ctx.lineTo(hx+72,GROUND);ctx.fill();
+      ctx.fillStyle='rgba(215,225,240,0.45)'; // snow cap
+      ctx.beginPath();ctx.moveTo(hx-16,GROUND-ph+22);ctx.lineTo(hx,GROUND-ph);ctx.lineTo(hx+16,GROUND-ph+22);ctx.fill();
+    }
+  }
+
+  else if(name==='Jungle'){
+    // Tall trees with layered canopy
+    for(let i=0;i<8;i++){
+      const hx=((cx*0.24+i*215)%(VW+280))+cx-140;
+      const th=75+(i*39)%55;
+      ctx.fillStyle='rgba(18,9,4,0.45)';
+      ctx.fillRect(hx-7,GROUND-th,14,th);
+      ctx.fillStyle='rgba(8,55,5,0.42)';
+      ctx.beginPath();ctx.arc(hx,GROUND-th-20,32,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(12,72,7,0.38)';
+      ctx.beginPath();ctx.arc(hx-14,GROUND-th-6,23,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(hx+16,GROUND-th-4,25,0,Math.PI*2);ctx.fill();
+    }
+  }
+
+  else if(name==='Volcano'){
+    // Volcano silhouettes + animated lava drips
+    for(let i=0;i<4;i++){
+      const hx=((cx*0.18+i*310)%(VW+400))+cx-200;
+      ctx.fillStyle='rgba(28,5,0,0.52)';
+      ctx.beginPath();ctx.moveTo(hx-65,GROUND);ctx.lineTo(hx,GROUND-125);ctx.lineTo(hx+65,GROUND);ctx.fill();
+      // lava glow at crater
+      ctx.globalAlpha=0.28+0.18*Math.sin(t*0.05+i*1.3);
+      ctx.fillStyle='#ff5500';
+      ctx.beginPath();ctx.arc(hx,GROUND-125,13,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      // animated drip running down the slope
+      const dripT=((t*0.7+i*55)%120)/120;
+      const dripX=hx+dripT*58;
+      const dripY=GROUND-125+dripT*125;
+      const dripR=Math.max(1,3.5*(1-dripT));
+      ctx.globalAlpha=0.65*(1-dripT);
+      ctx.fillStyle='#ff6600';
+      ctx.beginPath();ctx.arc(dripX,dripY,dripR,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Snow'){
+    // Drifting snowflakes at varying speeds/sizes
+    for(let i=0;i<32;i++){
+      const hx=((cx*0.3+i*80+(t*(0.4+(i%5)*0.15)))%(VW+60))+cx-30;
+      const hy=((t*(0.6+(i%4)*0.18)+i*58)%(GROUND+40))-10;
+      const r=1+(i%3);
+      ctx.globalAlpha=0.38+0.28*Math.sin(t*0.07+i);
+      ctx.fillStyle='rgba(235,245,255,1)';
+      ctx.beginPath();ctx.arc(hx,hy,r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+
+  else if(name==='Beach'){
+    // Palm trees with swaying fronds + gentle wave lines
+    for(let i=0;i<5;i++){
+      const hx=((cx*0.17+i*275)%(VW+360))+cx-180;
+      const sway=Math.sin(t*0.025+i)*0.12;
+      ctx.strokeStyle='rgba(95,55,10,0.52)';ctx.lineWidth=8;
+      ctx.beginPath();ctx.moveTo(hx,GROUND);
+      ctx.quadraticCurveTo(hx+18+i*3,GROUND-50,hx+28+sway*20,GROUND-85);ctx.stroke();
+      // fronds
+      ctx.lineWidth=3;
+      for(let l=0;l<5;l++){
+        const ang=(l/5)*Math.PI*2+sway+0.4;
+        ctx.strokeStyle='rgba(18,118,10,0.48)';
+        ctx.beginPath();
+        ctx.moveTo(hx+28+sway*20,GROUND-85);
+        ctx.bezierCurveTo(
+          hx+28+Math.cos(ang)*25,GROUND-85+Math.sin(ang)*10,
+          hx+28+Math.cos(ang)*40,GROUND-85+Math.sin(ang)*18,
+          hx+28+Math.cos(ang)*48,GROUND-85+Math.sin(ang)*24);
+        ctx.stroke();
+      }
+    }
+    // waves
+    ctx.lineWidth=1.5;
+    for(let w=0;w<3;w++){
+      const wOff=(t*1.1+w*70)%160;
+      ctx.strokeStyle=`rgba(30,120,200,${0.18+w*0.06})`;
+      ctx.beginPath();
+      for(let wx=0;wx<VW+60;wx+=18){
+        const wy=GROUND-3+Math.sin((wx+wOff)*0.055)*2.5;
+        wx===0?ctx.moveTo(cx+wx,wy):ctx.lineTo(cx+wx,wy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  else if(name==='Fantasy'){
+    // Drifting glowing orbs
+    const fColors=['#cc44ff','#ff44aa','#4455ff','#44ffcc','#ffaa44'];
+    for(let i=0;i<9;i++){
+      const hx=((cx*0.32+i*148+t*(0.12+(i%3)*0.06))%(VW+200))+cx-100;
+      const hy=55+Math.sin(t*0.03+i*0.85)*40+i*20;
+      const r=5+(i%3)*3;
+      ctx.globalAlpha=0.22+0.16*Math.sin(t*0.06+i*1.2);
+      ctx.fillStyle=fColors[i%5];
+      ctx.beginPath();ctx.arc(hx,hy,r*2.8,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=0.75;
+      ctx.beginPath();ctx.arc(hx,hy,r,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Mushroom Kingdom'){
+    const mColors=['rgba(200,28,18,0.48)','rgba(175,55,140,0.48)','rgba(215,80,18,0.48)','rgba(75,18,160,0.48)'];
+    for(let i=0;i<7;i++){
+      const hx=((cx*0.28+i*190)%(VW+260))+cx-130;
+      const sh=26+(i*25)%22; const sr=20+(i*19)%16;
+      ctx.fillStyle='rgba(225,205,175,0.42)';ctx.fillRect(hx-5,GROUND-sh,10,sh);
+      ctx.fillStyle=mColors[i%4];
+      ctx.beginPath();ctx.ellipse(hx,GROUND-sh,sr,sr*0.55,0,Math.PI,0);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.52)';
+      ctx.beginPath();ctx.arc(hx-7,GROUND-sh-7,4,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(hx+6,GROUND-sh-3,3,0,Math.PI*2);ctx.fill();
+    }
+  }
+
+  else if(name==='Desert'){
+    // Cacti
+    ctx.fillStyle='rgba(28,88,18,0.48)';
+    for(let i=0;i<6;i++){
+      const hx=((cx*0.21+i*260)%(VW+320))+cx-160;
+      const ch=42+(i*33)%32;
+      ctx.fillRect(hx-5,GROUND-ch,10,ch);
+      ctx.fillRect(hx-20,GROUND-ch*0.68,17,7);
+      ctx.fillRect(hx+3,GROUND-ch*0.53,17,7);
+      ctx.fillRect(hx-20,GROUND-ch*0.68-14,7,15);
+      ctx.fillRect(hx+14,GROUND-ch*0.53-12,7,13);
+    }
+    // heat shimmer lines near ground
+    ctx.globalAlpha=0.12+0.06*Math.sin(t*0.04);
+    ctx.strokeStyle='rgba(255,180,0,1)';ctx.lineWidth=1;
+    for(let h=0;h<3;h++){
+      const hy=GROUND-6-h*4;
+      ctx.beginPath();
+      for(let wx=0;wx<VW;wx+=15){
+        const wy=hy+Math.sin((wx+t*2+h*50)*0.07)*1.5;
+        wx===0?ctx.moveTo(cx+wx,wy):ctx.lineTo(cx+wx,wy);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+  }
+
+  else if(name==='Crystal Cave'){
+    // Glowing crystal formations growing from ground
+    const cColors=['rgba(0,210,255,1)','rgba(110,150,255,1)','rgba(155,100,255,1)','rgba(0,255,210,1)'];
+    for(let i=0;i<11;i++){
+      const hx=((cx*0.19+i*135)%(VW+180))+cx-90;
+      const ch=32+(i*31)%44; const cw=9+(i*11)%14;
+      ctx.globalAlpha=0.28+0.18*Math.sin(t*0.05+i*0.7);
+      ctx.fillStyle=cColors[i%4];
+      ctx.beginPath();
+      ctx.moveTo(hx,GROUND-ch);
+      ctx.lineTo(hx-cw/2,GROUND-ch*0.38);
+      ctx.lineTo(hx-cw/3,GROUND);
+      ctx.lineTo(hx+cw/3,GROUND);
+      ctx.lineTo(hx+cw/2,GROUND-ch*0.38);
+      ctx.closePath();ctx.fill();
+      // highlight facet
+      ctx.globalAlpha*=0.4;ctx.fillStyle='#fff';
+      ctx.beginPath();
+      ctx.moveTo(hx,GROUND-ch);
+      ctx.lineTo(hx-cw/2,GROUND-ch*0.38);
+      ctx.lineTo(hx,GROUND-ch*0.5);
+      ctx.closePath();ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Haunted Forest'){
+    // Gnarled dead trees
+    for(let i=0;i<7;i++){
+      const hx=((cx*0.26+i*205)%(VW+270))+cx-135;
+      const th=68+(i*31)%42;
+      ctx.strokeStyle=`rgba(12,22,12,0.52)`; ctx.lineWidth=5-(i%3);
+      ctx.beginPath();ctx.moveTo(hx,GROUND);ctx.lineTo(hx+(i%3-1)*6,GROUND-th);ctx.stroke();
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(hx,GROUND-th*0.68);ctx.lineTo(hx-22,GROUND-th*0.88);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(hx,GROUND-th*0.8);ctx.lineTo(hx+24,GROUND-th);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(hx,GROUND-th);ctx.lineTo(hx-15,GROUND-th-19);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(hx,GROUND-th);ctx.lineTo(hx+13,GROUND-th-16);ctx.stroke();
+    }
+    // Bats
+    for(let b=0;b<5;b++){
+      const bx=((cx*0.48+b*195+t*(0.38+b*0.1))%(VW+120))+cx-60;
+      const by=70+Math.sin(t*0.04+b*1.6)*28+b*22;
+      const flap=Math.sin(t*0.22+b);
+      ctx.globalAlpha=0.48;ctx.fillStyle='#111';
+      ctx.save();ctx.translate(bx,by);
+      ctx.beginPath();ctx.ellipse(0,0,5,3,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(-11,flap*5,8,4,-0.35,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(11,flap*5,8,4,0.35,0,Math.PI*2);ctx.fill();
+      ctx.restore();ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Lava World'){
+    // Pulsing lava geysers
+    for(let i=0;i<5;i++){
+      const hx=((cx*0.21+i*245)%(VW+310))+cx-155;
+      const phase=(t*0.042+i*1.35)%(Math.PI*2);
+      const gH=Math.max(0,Math.sin(phase))*75;
+      if(gH>1){
+        ctx.globalAlpha=Math.max(0,Math.sin(phase))*0.55;
+        const gr=ctx.createLinearGradient(hx,GROUND,hx,GROUND-gH);
+        gr.addColorStop(0,'rgba(255,100,0,0.9)');gr.addColorStop(1,'rgba(255,255,0,0)');
+        ctx.fillStyle=gr;
+        ctx.beginPath();ctx.ellipse(hx,GROUND,9,gH,0,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      }
+    }
+    // Floating ember sparks
+    for(let e=0;e<20;e++){
+      const ex=((cx*0.4+e*90+t*(0.5+e%4*0.15))%(VW+100))+cx-50;
+      const ey=GROUND-15-((t*(0.8+e%3*0.2)+e*38)%(GROUND-20));
+      ctx.globalAlpha=0.5+0.4*Math.sin(t*0.1+e);
+      ctx.fillStyle=e%3===0?'#ffcc00':'#ff6600';
+      ctx.fillRect(ex,ey,2,2);
+    }
+    ctx.globalAlpha=1;
+  }
+
+  else if(name==='Ice Cave'){
+    // Icicles hanging from top of view
+    const topY=s.cameraY+8;
+    for(let i=0;i<13;i++){
+      const hx=((cx*0.28+i*112)%(VW+150))+cx-75;
+      const il=22+(i*19)%38; const iw=6+(i*7)%9;
+      ctx.globalAlpha=0.38+0.14*Math.sin(t*0.04+i);
+      ctx.fillStyle='rgba(175,228,255,1)';
+      ctx.beginPath();ctx.moveTo(hx-iw/2,topY);ctx.lineTo(hx+iw/2,topY);ctx.lineTo(hx,topY+il);ctx.closePath();ctx.fill();
+      ctx.globalAlpha*=0.5;ctx.fillStyle='rgba(255,255,255,0.6)';
+      ctx.beginPath();ctx.moveTo(hx-iw/2,topY);ctx.lineTo(hx-iw/4,topY+il*0.38);ctx.lineTo(hx-iw/2+2,topY);ctx.closePath();ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Cyber City'){
+    // Building silhouettes with blinking windows
+    for(let i=0;i<8;i++){
+      const hx=((cx*0.14+i*175)%(VW+240))+cx-120;
+      const bh=75+(i*45)%72; const bw=28+(i*21)%26;
+      ctx.fillStyle='rgba(0,18,38,0.52)';ctx.fillRect(hx-bw/2,GROUND-bh,bw,bh);
+      // windows
+      for(let wy=8;wy<bh-8;wy+=13){
+        for(let wx=3;wx<bw-5;wx+=9){
+          if(Math.sin(i*7.3+wy*0.9+wx*1.2+t*0.018)>0.08){
+            ctx.fillStyle=`rgba(0,255,180,${0.22+0.2*Math.sin(t*0.04+i+wy)})`;
+            ctx.fillRect(hx-bw/2+wx,GROUND-bh+wy,6,8);
+          }
+        }
+      }
+    }
+  }
+
+  else if(name==='Ancient Ruins'){
+    // Stone columns, some crumbled
+    for(let i=0;i<6;i++){
+      const hx=((cx*0.19+i*235)%(VW+300))+cx-150;
+      const ph=52+(i*25)%38; const broken=i%3===2;
+      const topH=broken?Math.floor(ph*0.55):ph;
+      ctx.fillStyle='rgba(78,58,28,0.48)';
+      ctx.fillRect(hx-9,GROUND-topH,18,topH);
+      if(!broken){ctx.fillStyle='rgba(88,68,33,0.48)';ctx.fillRect(hx-13,GROUND-ph-9,26,10);}
+      ctx.fillStyle='rgba(88,68,33,0.48)';ctx.fillRect(hx-13,GROUND-8,26,8);
+    }
+  }
+
+  else if(name==='Cloud Kingdom'){
+    // Extra fluffy clouds drifting past
+    for(let i=0;i<6;i++){
+      const hx=((cx*0.22+i*210+t*(0.15+i*0.05))%(VW+280))+cx-140;
+      const hy=GROUND-120-i*28;
+      ctx.globalAlpha=0.28+0.12*Math.sin(t*0.03+i);
+      ctx.fillStyle='rgba(255,255,255,1)';
+      ctx.beginPath();ctx.ellipse(hx,hy,60+i*8,18,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(hx-22,hy-8,28,18,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(hx+25,hy-10,24,16,0,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Toxic Wasteland'){
+    // Barrels leaking toxic goo + puddles
+    for(let i=0;i<5;i++){
+      const hx=((cx*0.24+i*255)%(VW+320))+cx-160;
+      ctx.globalAlpha=0.28+0.1*Math.sin(t*0.06+i);
+      ctx.fillStyle='rgba(60,180,0,1)';
+      ctx.beginPath();ctx.ellipse(hx,GROUND-3,24,7,0,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=0.52;
+      ctx.fillStyle='rgba(38,38,38,1)';ctx.fillRect(hx-8,GROUND-28,16,25);
+      ctx.fillStyle='rgba(50,60,0,1)';ctx.fillRect(hx-9,GROUND-30,18,5);ctx.fillRect(hx-9,GROUND-20,18,4);
+      const dripY=(t*0.55+i*22)%24;
+      ctx.fillStyle='rgba(80,210,0,0.65)';
+      ctx.beginPath();ctx.arc(hx+4,GROUND-28+dripY,2.5,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  else if(name==='Rainbow Land'){
+    const rc=['rgba(255,0,0,0.28)','rgba(255,165,0,0.28)','rgba(255,255,0,0.28)','rgba(0,200,0,0.28)','rgba(0,100,255,0.28)','rgba(150,0,255,0.28)'];
+    const rOff=(cx*0.14)%400;
+    for(let i=0;i<rc.length;i++){
+      ctx.strokeStyle=rc[i];ctx.lineWidth=6;
+      ctx.beginPath();ctx.arc(cx+VW*0.28-rOff,GROUND+55,195+i*14,Math.PI,0);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx+VW*0.72-rOff*0.6,GROUND+75,155+i*11,Math.PI,0);ctx.stroke();
+    }
+  }
+
+  else if(name==='Shadow Realm'){
+    // Writhing dark tendrils from ground
+    for(let i=0;i<7;i++){
+      const hx=((cx*0.28+i*205)%(VW+260))+cx-130;
+      ctx.globalAlpha=0.22+0.14*Math.sin(t*0.04+i*1.1);
+      ctx.strokeStyle='rgba(80,0,80,1)';ctx.lineWidth=4+(i%3);
+      ctx.beginPath();ctx.moveTo(hx,GROUND);
+      for(let seg=0;seg<5;seg++){
+        ctx.lineTo(hx+Math.sin(t*0.03+seg*0.85+i)*16,GROUND-seg*26-14);
+      }
+      ctx.stroke();ctx.globalAlpha=1;
+    }
+  }
+
+  ctx.restore();
 }
 
 function drawPlatforms(s,bm){
@@ -1634,19 +1990,23 @@ function drawHUD(s){
   }
   ctx.textAlign='left';
 
-  // Biome entry notification (top of screen)
+  // Biome entry notification (slides down from top)
   if(s.biomeAlert>0){
-    const a=Math.min(1,s.biomeAlert/40)*Math.min(1,(s.biomeAlert)/200*4);
-    const slideY=Math.max(0,(1-(s.biomeAlert/200))*-20+(s.biomeAlert<40?(40-s.biomeAlert)/40*-20:0));
+    const elapsed=200-s.biomeAlert;
+    const fadeIn=Math.min(1,elapsed/12);
+    const fadeOut=s.biomeAlert<40?s.biomeAlert/40:1;
+    const a=fadeIn*fadeOut;
+    const slideOff=Math.round(Math.max(0,1-elapsed/12)*-52);
+    const ny=6+slideOff;
     ctx.save(); ctx.globalAlpha=a;
-    ctx.fillStyle='rgba(10,10,30,0.82)';
-    ctx.fillRect(W/2-140,4+slideY,280,34);
+    ctx.fillStyle='rgba(8,6,20,0.88)';
+    ctx.fillRect(W/2-155,ny,310,40);
     ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.5;
-    ctx.strokeRect(W/2-140,4+slideY,280,34);
-    ctx.fillStyle='#ffd700'; ctx.font='bold 13px monospace'; ctx.textAlign='center';
-    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,16+slideY);
-    ctx.fillStyle='#aaa'; ctx.font='9px monospace';
-    ctx.fillText('NEW BIOME',W/2,29+slideY);
+    ctx.strokeRect(W/2-155,ny,310,40);
+    ctx.fillStyle='#ffd700'; ctx.font='bold 14px monospace'; ctx.textAlign='center';
+    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,ny+17);
+    ctx.fillStyle='#888'; ctx.font='9px monospace';
+    ctx.fillText('NEW BIOME',W/2,ny+32);
     ctx.textAlign='left'; ctx.restore();
   }
   // Sky Kingdom alert
