@@ -397,7 +397,7 @@ function generateChunk(s, fromX) {
     if(Math.random()<0.7) s.coins.push({x:x+w/2-8,y:y-24,w:16,h:16,val:1,collected:false});
     if(Math.random()<0.4) for(let j=0;j<3;j++) s.coins.push({x:x+j*24,y:y-24,w:16,h:16,val:1,collected:false});
   }
-  // Upper platform layer (higher elevation, 2–3 smaller platforms per chunk)
+  // Layer 2: upper platforms (210–310 above ground, 1–2 per chunk)
   const numUpper = 1 + Math.floor(Math.random()*2);
   for(let i=0;i<numUpper;i++){
     const x=fromX+40+Math.random()*720, y=GROUND-210-Math.random()*100, w=60+Math.random()*80;
@@ -405,15 +405,37 @@ function generateChunk(s, fromX) {
     if(Math.random()<0.7) for(let j=0;j<2+Math.floor(Math.random()*3);j++)
       s.coins.push({x:x+j*28,y:y-22,w:16,h:16,val:2,collected:false});
   }
+  // Layer 3: high platforms (360–460 above ground, ~60% chance, smaller)
+  const highPlats=[];
+  if(Math.random()<0.6){
+    const x=fromX+60+Math.random()*700, y=GROUND-360-Math.random()*100, w=50+Math.random()*60;
+    s.platforms.push({x,y,w,h:13,type:'platform'});
+    highPlats.push({x,y,w});
+    for(let j=0;j<2+Math.floor(Math.random()*3);j++)
+      s.coins.push({x:x+j*24,y:y-22,w:16,h:16,val:3,collected:false});
+  }
+  // Layer 4: summit platforms (520–620 above ground, ~35% chance, rarest)
+  const topPlats=[];
+  if(Math.random()<0.35){
+    const x=fromX+80+Math.random()*680, y=GROUND-520-Math.random()*100, w=45+Math.random()*50;
+    s.platforms.push({x,y,w,h:12,type:'platform'});
+    topPlats.push({x,y,w});
+    for(let j=0;j<3+Math.floor(Math.random()*4);j++)
+      s.coins.push({x:x+j*22,y:y-22,w:16,h:16,val:5,collected:false});
+  }
   for(let i=0;i<5;i++) if(Math.random()<0.5) s.coins.push({x:fromX+Math.random()*800,y:GROUND-24,w:16,h:16,val:1,collected:false});
   if(s.distance>400 && Math.random()<0.3+lvl*0.02){
     const gx=fromX+200+Math.random()*400;
     s.platforms.push({x:gx,y:GROUND+10,w:60+lvl*10,h:12,type:'pit',deadly:true});
   }
-  // Rare treasure chest (4% per chunk)
-  if(Math.random()<0.04){
-    const tx=fromX+80+Math.random()*640, tv=20+Math.floor(Math.random()*31);
-    s.coins.push({x:tx,y:GROUND-28,w:26,h:22,val:tv,collected:false,isTreasure:true});
+  // Treasure chest: only on topmost (summit) layer, ~30% when one exists
+  // Falls back to high layer at 8% if no summit this chunk
+  if(topPlats.length>0 && Math.random()<0.30){
+    const tp=topPlats[0], tv=30+Math.floor(Math.random()*41);
+    s.coins.push({x:tp.x+tp.w/2-13,y:tp.y-28,w:26,h:22,val:tv,collected:false,isTreasure:true});
+  } else if(topPlats.length===0 && highPlats.length>0 && Math.random()<0.08){
+    const hp=highPlats[0], tv=20+Math.floor(Math.random()*21);
+    s.coins.push({x:hp.x+hp.w/2-13,y:hp.y-28,w:26,h:22,val:tv,collected:false,isTreasure:true});
   }
   // Mode powerup collectible (~7% per chunk, only after weapon path chosen)
   if(s.hero._weaponPath && Math.random()<0.07){
@@ -1493,8 +1515,22 @@ function drawPlatforms(s,bm){
       continue;
     }
     if(p.type==='pit'){
-      ctx.fillStyle=rgb(bm.sky1);ctx.fillRect(p.x,GROUND,p.w,H-GROUND+10);
-      ctx.fillStyle='#ff2200';ctx.fillRect(p.x,GROUND+p.h,p.w,4);
+      const pitH=H-GROUND+10;
+      // Gradient: dark void at top → glowing lava at bottom
+      const pitGr=ctx.createLinearGradient(p.x,GROUND,p.x,GROUND+pitH);
+      pitGr.addColorStop(0,'rgba(6,0,0,0.96)');
+      pitGr.addColorStop(0.6,'rgba(50,4,0,0.92)');
+      pitGr.addColorStop(1,'rgba(220,35,0,0.9)');
+      ctx.fillStyle=pitGr;ctx.fillRect(p.x,GROUND,p.w,pitH);
+      // Animated lava glow strip at base
+      const lA=0.45+0.35*Math.sin(s.frameCount*0.07+p.x*0.01);
+      ctx.fillStyle=`rgba(255,80,0,${lA})`;ctx.fillRect(p.x,GROUND+pitH-10,p.w,10);
+      // Glowing red border + top-edge warning
+      ctx.save();ctx.strokeStyle='rgba(255,45,0,0.75)';ctx.lineWidth=2;
+      ctx.strokeRect(p.x+1,GROUND,p.w-2,pitH-2);
+      ctx.fillStyle=`rgba(255,60,0,${0.6+0.3*Math.sin(s.frameCount*0.1+p.x)})`;
+      ctx.fillRect(p.x,GROUND,p.w,4);
+      ctx.restore();
       continue;
     }
     ctx.fillStyle=rgb(bm.plt);ctx.fillRect(p.x,p.y,p.w,p.h);
@@ -1953,20 +1989,28 @@ function drawHUD(s){
     {key:'fireball',icon:'🔥',cd:h.fireballCooldown,maxCd:FB_CD[h.weapons.fireball.level]||100,hint:'V'},
     {key:'orbs',    icon:'🔮',cd:0,maxCd:1,hint:'auto'},
   ].filter(w=>h.weapons[w.key]&&h.weapons[w.key].level>0);
+  // Responsive scale: keeps icons small on 720-wide canvas, scales up on larger (high-dpi phone)
+  const sc=Math.max(1,W/720);
+  const iSz=Math.round(18*sc);  // icon font px
+  const hSz=Math.round(9*sc);   // hint font px
+  const barW0=Math.round(22*sc),barH0=Math.round(Math.max(3,3*sc));
+  const iconY=Math.round(22*sc),hintY=Math.round(35*sc),barY0=Math.round(25*sc);
+  const step=Math.round(34*sc);
+
   // Wings indicator
   if(h._wings||h._wingsActive){
-    ctx.font='18px serif';ctx.textAlign='right';
-    ctx.fillText(h._wingsActive?'🪽✨':'🪽',W-8,22);
+    ctx.font=`${iSz}px serif`;ctx.textAlign='right';
+    ctx.fillText(h._wingsActive?'🪽✨':'🪽',W-8,iconY);
     if(h._wingsActive){
-      ctx.fillStyle='#aaddff';ctx.font='9px monospace';
-      ctx.fillText('FLYING',W-8,34);
+      ctx.fillStyle='#aaddff';ctx.font=`${hSz}px monospace`;
+      ctx.fillText('FLYING',W-8,hintY);
     }
     ctx.textAlign='left';
   }
   // Diamond count
   const meta=loadMeta();
   if(meta.diamonds>0||true){
-    ctx.font='13px monospace';ctx.fillStyle='#cc88ff';ctx.textAlign='right';
+    ctx.font=`${Math.round(13*sc)}px monospace`;ctx.fillStyle='#cc88ff';ctx.textAlign='right';
     ctx.fillText('💎 '+meta.diamonds,W-8,H-10);
     ctx.textAlign='left';
   }
@@ -1974,40 +2018,41 @@ function drawHUD(s){
   let wx=W-8;
   ctx.textAlign='right';
   for(const w of weapons.reverse()){
-    // icon
-    ctx.font='18px serif';
-    ctx.fillText(w.icon,wx,22);
-    // cooldown bar
-    const barX=wx-22, barY=25, barW=22, barH=3;
-    ctx.fillStyle='#333';ctx.fillRect(barX,barY,barW,barH);
+    ctx.font=`${iSz}px serif`;
+    ctx.fillText(w.icon,wx,iconY);
+    const barX=wx-barW0, barH=barH0;
+    ctx.fillStyle='#333';ctx.fillRect(barX,barY0,barW0,barH);
     const ready=w.maxCd>0?1-w.cd/w.maxCd:1;
     ctx.fillStyle=ready>=1?'#44ff44':'#ff8800';
-    ctx.fillRect(barX,barY,barW*Math.max(0,ready),barH);
-    // key hint
-    ctx.font='9px monospace';ctx.fillStyle='#888';
-    ctx.fillText(w.hint,wx,35);
-    wx-=34;
+    ctx.fillRect(barX,barY0,barW0*Math.max(0,ready),barH);
+    ctx.font=`${hSz}px monospace`;ctx.fillStyle='#888';
+    ctx.fillText(w.hint,wx,hintY);
+    wx-=step;
   }
   ctx.textAlign='left';
 
-  // Biome entry notification (slides down from top)
+  // Biome entry notification — responsive sizing
   if(s.biomeAlert>0){
     const elapsed=200-s.biomeAlert;
     const fadeIn=Math.min(1,elapsed/12);
     const fadeOut=s.biomeAlert<40?s.biomeAlert/40:1;
     const a=fadeIn*fadeOut;
-    const slideOff=Math.round(Math.max(0,1-elapsed/12)*-52);
+    const bw=Math.min(W*0.9,Math.max(260,Math.round(W*0.72)));
+    const bh=Math.max(38,Math.round(W*0.075));
+    const bfMain=Math.max(12,Math.round(W*0.023));
+    const bfSub=Math.max(8,Math.round(W*0.014));
+    const slideOff=Math.round(Math.max(0,1-elapsed/12)*-(bh+8));
     const ny=6+slideOff;
-    ctx.save(); ctx.globalAlpha=a;
+    ctx.save();ctx.globalAlpha=a;
     ctx.fillStyle='rgba(8,6,20,0.88)';
-    ctx.fillRect(W/2-155,ny,310,40);
-    ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.5;
-    ctx.strokeRect(W/2-155,ny,310,40);
-    ctx.fillStyle='#ffd700'; ctx.font='bold 14px monospace'; ctx.textAlign='center';
-    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,ny+17);
-    ctx.fillStyle='#888'; ctx.font='9px monospace';
-    ctx.fillText('NEW BIOME',W/2,ny+32);
-    ctx.textAlign='left'; ctx.restore();
+    ctx.fillRect(W/2-bw/2,ny,bw,bh);
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=Math.max(1,Math.round(1.5*sc));
+    ctx.strokeRect(W/2-bw/2,ny,bw,bh);
+    ctx.fillStyle='#ffd700';ctx.font=`bold ${bfMain}px monospace`;ctx.textAlign='center';
+    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,ny+Math.round(bh*0.46));
+    ctx.fillStyle='#888';ctx.font=`${bfSub}px monospace`;
+    ctx.fillText('NEW BIOME',W/2,ny+Math.round(bh*0.82));
+    ctx.textAlign='left';ctx.restore();
   }
   // Sky Kingdom alert
   if(s.skyAlert>0){
