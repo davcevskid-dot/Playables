@@ -3,7 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Forward Platformer</title>
+<!-- Capacitor core (loaded when running as native Android app) -->
+<script>
+  // Request fullscreen / immersive mode on first touch (Android WebView)
+  document.addEventListener('touchstart', function tryFullscreen() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    document.removeEventListener('touchstart', tryFullscreen);
+  }, {once: true, passive: true});
+  // Prevent context menu on long-press (Android WebView shows it by default)
+  window.addEventListener('contextmenu', e => e.preventDefault());
+</script>
+<title>FORWARD!</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100dvh; font-family: monospace; overflow: hidden; touch-action: none; }

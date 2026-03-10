@@ -1,0 +1,21 @@
+{
+  "appId": "com.forward.platformer",
+  "appName": "FORWARD!",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#0a0a0f",
+    "overrideUserAgent": "FORWARD-App/1.0"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#0a0a0f",
+      "androidSplashResourceName": "splash",
+      "showSpinner": false
+    }
+  }
+}
