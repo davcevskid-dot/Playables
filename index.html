@@ -236,6 +236,7 @@
   <p id="go-diamonds" style="color:#cc88ff;font-size:14px;margin:6px 0"></p>
   <button onclick="openMetaShop()">💎 Meta Shop & Continue</button>
   <button onclick="startGame(false)" style="background:#553;margin-top:8px;font-size:13px">🔄 New Game (reset all)</button>
+  <button onclick="goToMainMenu()" style="background:#225;margin-top:8px;font-size:13px;border-color:#44a">🏠 Main Menu</button>
 </div>
 
 <div id="meta-shop" class="overlay" style="background:rgba(10,0,20,0.97)">
@@ -502,11 +503,11 @@ const SHOP_ITEMS = [
   { icon:'👟', name:'Speed Boots',   desc:'+10% Move Speed (max 3)',       cost:25,  canBuy:h=>(h._speedBootCount||0)<3, apply:h=>{ h.speed*=1.1; h._speedBootCount=(h._speedBootCount||0)+1; }},
   { icon:'🦅', name:'Double Jump',   desc:'Jump again while in mid-air!',  cost:150, canBuy:h=>!h._doubleJump, apply:h=>{ h._doubleJump=true; }},
   { icon:'🦋', name:'Triple Jump',   desc:'A third jump — needs Dbl Jump', cost:600, canBuy:h=>h._doubleJump&&!h._tripleJump, apply:h=>{ h._tripleJump=true; }},
-  // Single upgradeable shield — cost escalates +33% per tier, no cap
+  // Max Health upgrade — cost escalates +33% per tier, no cap
   {
-    icon: h=>['🛡','🛡️','🔰','⚜️','👑','🏆'][(h._shieldTier||0)%6],
-    name: h=>`Shield Upgrade (Tier ${(h._shieldTier||0)+1})`,
-    desc: h=>`+1 Max HP per upgrade. HP now: ${h.maxHp}`,
+    icon: '❤️',
+    name: h=>`Max Health+ (Tier ${(h._shieldTier||0)+1})`,
+    desc: h=>`+1 Max HP. Currently: ${h.maxHp} HP`,
     cost: h=>Math.round(55*Math.pow(1.33,(h._shieldTier||0))),
     apply: h=>{ h.maxHp+=1; h.hp=Math.min(h.hp+1,h.maxHp); h._shieldTier=(h._shieldTier||0)+1; },
   },
@@ -533,7 +534,6 @@ function pickUpgrades(){
 const META_PERKS = [
   { id:'hp',    icon:'❤️',  name:'+2 Max HP',       desc:'Start every run with +2 HP',       cost:3,  apply:(h)=>{ h.maxHp+=2; h.hp+=2; }},
   { id:'atk',   icon:'⚔️',  name:'+1 Attack',       desc:'Start every run +1 stronger',       cost:5,  apply:(h)=>{ h.atkPow+=1; }},
-  { id:'def',   icon:'🛡️',  name:'+1 Max HP',       desc:'Start every run with extra HP',     cost:4,  apply:(h)=>{ h.maxHp+=1; h.hp+=1; }},
   { id:'coins', icon:'🪙',  name:'+80 Start Coins',  desc:'Begin each run with extra coins',   cost:6,  apply:(h,s)=>{ s.coinCount+=80; }},
   { id:'sword', icon:'🗡️',  name:'Start with Sword', desc:'Begin with Sword Lv.1 equipped',   cost:15, max:1, apply:(h)=>{ h.weapons.sword.level=1; h._weaponPath='sword'; }},
   { id:'gun',   icon:'🔫',  name:'Start with Gun',   desc:'Begin with Gun Lv.1 equipped',     cost:15, max:1, apply:(h)=>{ h.weapons.gun.level=1; h._weaponPath='gun'; }},
@@ -573,13 +573,15 @@ function createState() {
       _jumpSpringTimer:0, _shield:false, _speedBootCount:0, _hasteMult:1, _vampirism:false,
       _doubleJump:false, _tripleJump:false, _jumpsUsed:0, _jumpWasDown:false,
       _weaponPath:null, _gunMode:null, _swordMode:null, _poison:null,
+      _jetpackFuel:0, _jetpackMax:300, _godTimer:0,
     },
     platforms:[], coins:[], enemies:[], particles:[], powerups:[],
     worldX:0, keys:{}, frameCount:0,
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
     reachedSkyKingdom:false, _coinMult:1, _popups:[],
-    bossSpawned:false, diamonds:[], hearts:[],
+    bossSpawned:false, diamonds:[], hearts:[], stars:[], jetpacks:[],
     biomeAlert:0, biomeAlertName:'', lastBiomeName:'',
+    _biomeFlash:0, _biomeFlashCol:[0,0,0],
     _visitedBiomes:new Set(), _killCount:0, _bossKilled:false, _achNotifQueue:[],
   };
 }
@@ -649,6 +651,18 @@ function generateChunk(s, fromX) {
   // Purple Diamond (~6% per chunk)
   if(Math.random()<0.06){
     s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-34,w:28,h:28,collected:false});
+  }
+  // Jetpack (~7% per chunk) — placed on a platform
+  if(Math.random()<0.07){
+    const allPlats2=s.platforms.filter(p=>p.x>=fromX&&p.type==='platform');
+    const rp2=allPlats2.length>0?allPlats2[Math.floor(Math.random()*allPlats2.length)]:null;
+    const jpx=rp2?rp2.x+rp2.w/2-14:fromX+120+Math.random()*560;
+    const jpy=rp2?rp2.y-32:GROUND-38;
+    s.jetpacks.push({x:jpx,y:jpy,w:28,h:32,collected:false});
+  }
+  // Star (god mode, 10s) — ~5% per chunk
+  if(Math.random()<0.05){
+    s.stars.push({x:fromX+80+Math.random()*640,y:GROUND-38,w:26,h:26,collected:false});
   }
   // Heart (+1 maxHp) — rarer than coins, slightly more common than treasures (~8% per chunk)
   if(Math.random()<0.08){
@@ -787,14 +801,15 @@ function update(s) {
 
   const curBiome=getBiome(s.distance);
   const isIcy=curBiome.name==='Snow'||curBiome.name==='Ice Cave';
+  const godActive=h._godTimer>0;
+  const effSpd=spd*(godActive?1.6:1);
   if(isIcy&&h.onGround){
-    // Icy ground: slow acceleration + very low friction so player slides
-    if(left)       { h.vx=Math.max(h.vx-0.55,-spd); h.facing=-1; }
-    else if(right) { h.vx=Math.min(h.vx+0.55, spd); h.facing= 1; }
+    if(left)       { h.vx=Math.max(h.vx-0.55,-effSpd); h.facing=-1; }
+    else if(right) { h.vx=Math.min(h.vx+0.55, effSpd); h.facing= 1; }
     else h.vx*=0.975;
   } else {
-    if(left)       {h.vx=-spd;h.facing=-1;}
-    else if(right) {h.vx= spd;h.facing= 1;}
+    if(left)       {h.vx=-effSpd;h.facing=-1;}
+    else if(right) {h.vx= effSpd;h.facing= 1;}
     else h.vx*=0.7;
   }
 
@@ -822,6 +837,12 @@ function update(s) {
       spawnParticles(s,h.x+h.w/2-8,h.y+h.h,'#ffffff',2);
       spawnParticles(s,h.x+h.w/2+8,h.y+h.h,'#e0e8ff',2);
     }
+  }
+  // Jetpack thrust — activated by holding jump while airborne
+  if(jump && !h.onGround && h._jetpackFuel>0){
+    h.vy=Math.max(h.vy-0.55,-8);
+    h._jetpackFuel--;
+    if(s.frameCount%2===0) spawnParticles(s,h.x+h.w/2,h.y+h.h,'#ff6600',2);
   }
 
   const swordLvl=h.weapons.sword.level;
@@ -898,7 +919,9 @@ function update(s) {
   s.enemies=s.enemies.filter(e=>e.x+e.w>cullX&&!e.dead);
   s.powerups=s.powerups.filter(pu=>pu.x>cullX);
   s.diamonds=s.diamonds.filter(d=>d.x>cullX);
-  if(s.hearts) s.hearts=s.hearts.filter(ht=>ht.x>cullX);
+  if(s.hearts)   s.hearts=s.hearts.filter(ht=>ht.x>cullX);
+  if(s.stars)    s.stars=s.stars.filter(st=>st.x>cullX);
+  if(s.jetpacks) s.jetpacks=s.jetpacks.filter(jp=>jp.x>cullX);
   projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoomX+100);
 
   // Hero poison (from poisoner enemies)
@@ -927,6 +950,30 @@ function update(s) {
   }
   s.coins=s.coins.filter(c=>!c.collected);
 
+  // Jetpack collection
+  if(s.jetpacks){
+    for(const jp of s.jetpacks){
+      if(!jp.collected&&rectOverlap(h,jp)){
+        jp.collected=true;
+        h._jetpackFuel=h._jetpackMax;
+        spawnParticles(s,jp.x+jp.w/2,jp.y+jp.h/2,'#ff6600',14);
+        s._popups.push({x:jp.x+jp.w/2,y:jp.y-8,text:'🚀 Jetpack!',life:100,vy:-0.8});
+      }
+    }
+    s.jetpacks=s.jetpacks.filter(jp=>!jp.collected);
+  }
+  // Star (god mode) collection
+  if(s.stars){
+    for(const st of s.stars){
+      if(!st.collected&&rectOverlap(h,st)){
+        st.collected=true;
+        h._godTimer=600; // 10 seconds
+        spawnParticles(s,st.x+st.w/2,st.y+st.h/2,'#ffff00',20);
+        s._popups.push({x:st.x+st.w/2,y:st.y-8,text:'⭐ GOD MODE!',life:130,vy:-0.9});
+      }
+    }
+    s.stars=s.stars.filter(st=>!st.collected);
+  }
   // Powerup collection
   for(const pu of s.powerups){
     if(!pu.collected&&rectOverlap(h,pu)){
@@ -964,6 +1011,15 @@ function update(s) {
     s.hearts=s.hearts.filter(ht=>!ht.collected);
   }
 
+  // God mode — kill enemies on touch, tick down timer
+  if(h._godTimer>0){
+    h._godTimer--;
+    for(const e of s.enemies){
+      if(!e.dead&&rectOverlap(h,e)) damageEnemy(s,e,99999);
+    }
+    if(s.frameCount%4===0) spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#ffff00',2);
+  }
+
   for(const e of s.enemies) updateEnemy(s,e);
 
   // Projectile update
@@ -997,7 +1053,11 @@ function update(s) {
   const bm=getBiome(s.distance);
   if(!s._visitedBiomes) s._visitedBiomes=new Set();
   s._visitedBiomes.add(bm.name);
-  if(s.lastBiomeName && bm.name!==s.lastBiomeName){ showBiomeNotif(bm.name); }
+  if(s.lastBiomeName && bm.name!==s.lastBiomeName){
+    showBiomeNotif(bm.name);
+    s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+  }
+  if(s._biomeFlash>0) s._biomeFlash--;
   s.lastBiomeName=bm.name;
   if(s.frameCount%90===0) checkAchievements(s);
   document.getElementById('ui-lvl').textContent=h.lvl;
@@ -1310,6 +1370,8 @@ function draw(s){
   drawPlatforms(s,bm);
   drawDiamonds(s);
   drawHearts(s);
+  drawJetpacks(s);
+  drawStars(s);
   drawCoins(s);
   drawPowerups(s);
   drawEnemies(s);
@@ -1873,6 +1935,71 @@ function drawHearts(s){
   }
 }
 
+function drawJetpacks(s){
+  if(!s.jetpacks) return;
+  const t=s.frameCount;
+  for(const jp of s.jetpacks){
+    if(jp.x<s.camera-40||jp.x>s.camera+W/gameZoomX+40) continue;
+    const bob=Math.sin(t*0.08+jp.x*0.02)*3;
+    const cx=jp.x+jp.w/2, cy=jp.y+jp.h/2+bob;
+    ctx.save();
+    // Glow
+    ctx.globalAlpha=0.35+0.2*Math.sin(t*0.1);
+    ctx.fillStyle='#ff6600';
+    ctx.beginPath();ctx.arc(cx,cy,jp.w*0.85,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // Tank body
+    ctx.fillStyle='#cc3300';ctx.beginPath();ctx.roundRect(jp.x+4,jp.y+bob,jp.w-8,jp.h-8,5);ctx.fill();
+    // Tank stripe
+    ctx.fillStyle='#ff8800';ctx.fillRect(jp.x+6,jp.y+bob+8,jp.w-12,4);
+    // Nozzle
+    ctx.fillStyle='#666';ctx.fillRect(jp.x+jp.w/2-4,jp.y+bob+jp.h-10,8,8);
+    // Flame jet (animated)
+    const fA=0.6+0.4*Math.sin(t*0.25);
+    ctx.globalAlpha=fA;ctx.fillStyle='#ffff00';
+    ctx.beginPath();ctx.moveTo(jp.x+jp.w/2-4,jp.y+bob+jp.h-4);
+    ctx.lineTo(jp.x+jp.w/2+4,jp.y+bob+jp.h-4);
+    ctx.lineTo(jp.x+jp.w/2,jp.y+bob+jp.h+8+Math.random()*4);ctx.fill();
+    ctx.globalAlpha=1;
+    // Label
+    ctx.font='bold 8px monospace';ctx.fillStyle='#fff';ctx.textAlign='center';
+    ctx.fillText('JET',cx,jp.y+bob-3);ctx.textAlign='left';
+    ctx.restore();
+  }
+}
+
+function drawStars(s){
+  if(!s.stars) return;
+  const t=s.frameCount;
+  for(const st of s.stars){
+    if(st.x<s.camera-40||st.x>s.camera+W/gameZoomX+40) continue;
+    const bob=Math.sin(t*0.1+st.x*0.02)*4;
+    const cx=st.x+st.w/2, cy=st.y+st.h/2+bob;
+    const r=st.w/2;
+    ctx.save();
+    // Spinning glow
+    ctx.globalAlpha=0.4+0.3*Math.sin(t*0.15);
+    ctx.fillStyle='#ffff00';
+    ctx.beginPath();ctx.arc(cx,cy,r*1.7,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // 5-point star
+    ctx.fillStyle='#ffe800';
+    ctx.translate(cx,cy);ctx.rotate(t*0.04);
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a=i*Math.PI*2/5-Math.PI/2;
+      const ia=a+Math.PI/5;
+      i===0?ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r):ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+      ctx.lineTo(Math.cos(ia)*r*0.42,Math.sin(ia)*r*0.42);
+    }
+    ctx.closePath();ctx.fill();
+    // Centre highlight
+    ctx.globalAlpha=0.6;ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(0,0,r*0.22,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawCoins(s){
   s.coins.forEach(c=>{
     if(c.x<s.camera-30||c.x>s.camera+W/gameZoomX+30) return;
@@ -2261,6 +2388,29 @@ function drawHUD(s){
   const iconY=Math.round(22*sc),hintY=Math.round(35*sc),barY0=Math.round(25*sc);
   const step=Math.round(34*sc);
 
+  // Jetpack fuel bar (bottom-left, above XP bar)
+  if(h._jetpackFuel>0){
+    const fuelPct=h._jetpackFuel/h._jetpackMax;
+    const fW=Math.round(80*sc),fH=Math.round(7*sc),fX=8,fY=H-Math.round(18*sc);
+    ctx.fillStyle='#333';ctx.fillRect(fX,fY,fW,fH);
+    ctx.fillStyle=fuelPct>0.4?'#ff6600':'#ff2200';
+    ctx.fillRect(fX,fY,Math.round(fW*fuelPct),fH);
+    ctx.strokeStyle='#ff8800';ctx.lineWidth=1;ctx.strokeRect(fX,fY,fW,fH);
+    ctx.font=`${Math.round(8*sc)}px monospace`;ctx.fillStyle='#ff8800';ctx.textAlign='left';
+    ctx.fillText('🚀 FUEL',fX,fY-2);
+  }
+  // God mode overlay + timer
+  if(h._godTimer>0){
+    const gt=h._godTimer;
+    ctx.save();
+    ctx.globalAlpha=0.12+0.06*Math.sin(s.frameCount*0.2);
+    ctx.fillStyle='#ffff00';ctx.fillRect(0,0,W,H);
+    ctx.restore();
+    const secs=Math.ceil(gt/60);
+    ctx.font=`bold ${Math.round(14*sc)}px monospace`;ctx.fillStyle='#ffff00';ctx.textAlign='center';
+    ctx.fillText('⭐ GOD MODE '+secs+'s',W/2,Math.round(48*sc));
+    ctx.textAlign='left';
+  }
   // Wings indicator
   if(h._wings||h._wingsActive){
     ctx.font=`${iSz}px serif`;ctx.textAlign='right';
@@ -2308,6 +2458,14 @@ function drawHUD(s){
     ctx.font='13px monospace';ctx.fillStyle='#003366';
     ctx.fillText('You have reached the heavens!',W/2,H/2+22);
     ctx.textAlign='left';ctx.restore();
+  }
+  // Biome transition flash overlay
+  if(s._biomeFlash>0){
+    const bf=s._biomeFlash;
+    const a=Math.min(bf/15,1)*Math.min(1,(bf/55)*2)*0.38;
+    ctx.save();ctx.globalAlpha=a;
+    ctx.fillStyle=rgb(s._biomeFlashCol);ctx.fillRect(0,0,W,H);
+    ctx.restore();
   }
 }
 
@@ -2405,6 +2563,12 @@ function renderShop(){
 }
 
 // ---- Game Over ----
+function goToMainMenu(){
+  document.getElementById('gameover').style.display='none';
+  document.getElementById('meta-shop').classList.remove('show');
+  document.getElementById('main-menu').classList.add('show');
+  updateMenuButtons();
+}
 function showGameOver(s){
   checkAchievements(s);
   document.getElementById('go-stats').innerHTML=`Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount}`;
