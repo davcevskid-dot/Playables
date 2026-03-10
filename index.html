@@ -424,8 +424,8 @@ function generateChunk(s, fromX) {
     const px=fromX+100+Math.random()*600;
     s.powerups.push({x:px,y:GROUND-38,w:28,h:28,path,modeKey,modeDef,collected:false});
   }
-  // Purple Diamond (~1.5% per chunk)
-  if(Math.random()<0.015){
+  // Purple Diamond (~6% per chunk)
+  if(Math.random()<0.06){
     s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-34,w:28,h:28,collected:false});
   }
   // Dragon Boss — spawns once at biome 14 (~7000m)
