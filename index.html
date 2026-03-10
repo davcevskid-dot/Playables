@@ -62,6 +62,32 @@
   #gameover h2 { color: #e55; font-size: 32px; margin-bottom: 12px; }
   #gameover button { margin-top: 16px; padding: 10px 28px; background: #e55; border: none; border-radius: 6px; color: #fff; font-size: 16px; cursor: pointer; font-family: monospace; }
 
+  /* ---- Notification Overlays ---- */
+  #biome-notif, #ach-notif {
+    position: fixed; left: 50%; transform: translateX(-50%) translateY(-120px);
+    z-index: 50; pointer-events: none; transition: transform 0.28s cubic-bezier(.22,1,.36,1);
+    text-align: center; white-space: nowrap;
+  }
+  #biome-notif.show, #ach-notif.show { transform: translateX(-50%) translateY(0); }
+  #biome-notif {
+    top: 8px; background: rgba(8,6,20,0.92); border: 2px solid #ffd700;
+    border-radius: 10px; padding: 8px 22px 6px;
+    font-family: monospace;
+  }
+  #biome-notif .bn-title { font-size: clamp(14px,3.5vw,20px); font-weight: bold; color: #ffd700; letter-spacing: 1px; }
+  #biome-notif .bn-sub   { font-size: clamp(10px,2.2vw,13px); color: #888; margin-top: 1px; }
+  #ach-notif {
+    bottom: 14px; top: auto; left: 50%; transform: translateX(-50%) translateY(120px);
+    background: rgba(10,5,28,0.95); border: 2px solid #cc88ff;
+    border-radius: 10px; padding: 8px 16px 8px 12px; display: flex; align-items: center; gap: 10px;
+    font-family: monospace; min-width: 220px;
+  }
+  #ach-notif.show { transform: translateX(-50%) translateY(0); }
+  #ach-notif .an-icon  { font-size: clamp(20px,5vw,28px); line-height: 1; }
+  #ach-notif .an-label { font-size: clamp(8px,2vw,11px); color: #cc88ff; font-weight: bold; letter-spacing: 1px; }
+  #ach-notif .an-name  { font-size: clamp(10px,2.5vw,14px); color: #ffd700; font-weight: bold; }
+  #ach-notif .an-reward{ font-size: clamp(9px,2vw,12px); color: #aa77ff; margin-left: auto; padding-left: 8px; }
+
   /* ---- Achievements ---- */
   #ach-screen { background: rgba(8,4,24,0.97); }
   #ach-screen h2 { color: #ffd700; font-size: 22px; margin-bottom: 2px; }
@@ -217,6 +243,20 @@
   <button onclick="closeAchievements()" style="margin-top:14px;padding:8px 26px;background:#333;border:1px solid #555;border-radius:6px;color:#ccc;font-size:13px;cursor:pointer;font-family:monospace">✕ Close</button>
 </div>
 
+<!-- HTML notification overlays (replaces canvas-drawn notifications) -->
+<div id="biome-notif">
+  <div class="bn-title" id="bn-title">⬢ BIOME NAME</div>
+  <div class="bn-sub">NEW BIOME</div>
+</div>
+<div id="ach-notif">
+  <div class="an-icon" id="an-icon">🏆</div>
+  <div>
+    <div class="an-label">ACHIEVEMENT UNLOCKED</div>
+    <div class="an-name" id="an-name">Achievement</div>
+  </div>
+  <div class="an-reward">+1 💎</div>
+</div>
+
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -251,8 +291,7 @@ const BIOMES = [
 ];
 // ---- Achievements ----
 const ACHIEVEMENTS = [
-  // Biome discoveries (indices match BIOMES 0-14)
-  {id:'b_plains',   icon:'🌿', name:'Plains Walker',     desc:'Reach the Plains',            cat:'biome'},
+  // Biome discoveries (indices match BIOMES 1-14, Plains excluded as starting biome)
   {id:'b_mountain', icon:'⛰️', name:'Mountain Climber',  desc:'Reach the Mountain',          cat:'biome'},
   {id:'b_jungle',   icon:'🌴', name:'Jungle Explorer',   desc:'Reach the Jungle',            cat:'biome'},
   {id:'b_volcano',  icon:'🌋', name:'Volcano Diver',     desc:'Enter the Volcano',           cat:'biome'},
@@ -281,10 +320,12 @@ const ACHIEVEMENTS = [
   {id:'kill_100',  icon:'💥', name:'Unstoppable',    desc:'Kill 100 enemies in a run',   cat:'combat'},
   {id:'boss_kill', icon:'🐉', name:'Dragon Slayer',  desc:'Defeat the Dragon Boss',      cat:'combat'},
   // Wealth
-  {id:'coins_100', icon:'🪙', name:'Coin Collector', desc:'Collect 100 coins in a run',  cat:'coins'},
-  {id:'coins_500', icon:'💰', name:'Wealthy',        desc:'Collect 500 coins in a run',  cat:'coins'},
+  {id:'coins_100', icon:'🪙', name:'Coin Collector', desc:'Collect 100 coins in a run',   cat:'coins'},
+  {id:'coins_500', icon:'💰', name:'Wealthy',        desc:'Collect 500 coins in a run',   cat:'coins'},
+  {id:'coins_1k',  icon:'🤑', name:'Gold Hoarder',   desc:'Collect 1,000 coins in a run', cat:'coins'},
+  {id:'coins_10k', icon:'👑', name:'Lord of Coins',  desc:'Collect 10,000 coins in a run',cat:'coins'},
 ];
-const _BIOME_ACH_IDS=['b_plains','b_mountain','b_jungle','b_volcano','b_snow','b_beach','b_fantasy','b_mushroom','b_space','b_desert','b_crystal','b_haunted','b_lava','b_ice','b_cyber'];
+const _BIOME_ACH_IDS=[null,'b_mountain','b_jungle','b_volcano','b_snow','b_beach','b_fantasy','b_mushroom','b_space','b_desert','b_crystal','b_haunted','b_lava','b_ice','b_cyber'];
 
 function checkAchievements(s){
   const meta=loadMeta();
@@ -294,7 +335,7 @@ function checkAchievements(s){
   const chk=(id,cond)=>{ if(cond&&!unlocked.has(id)){ unlocked.add(id); newOnes.push(id); } };
   // Biome
   const visited=s._visitedBiomes||new Set();
-  BIOMES.slice(0,15).forEach((bm,i)=>chk(_BIOME_ACH_IDS[i],visited.has(bm.name)));
+  BIOMES.slice(0,15).forEach((bm,i)=>{ if(_BIOME_ACH_IDS[i]) chk(_BIOME_ACH_IDS[i],visited.has(bm.name)); });
   // Run milestones
   chk('dist_500',s.distance>=500); chk('dist_2k',s.distance>=2000); chk('dist_5k',s.distance>=5000);
   chk('lvl_5',s.hero.lvl>=5); chk('lvl_10',s.hero.lvl>=10);
@@ -304,6 +345,7 @@ function checkAchievements(s){
   chk('boss_kill',!!s._bossKilled);
   // Wealth
   chk('coins_100',s.coinCount>=100); chk('coins_500',s.coinCount>=500);
+  chk('coins_1k',s.coinCount>=1000); chk('coins_10k',s.coinCount>=10000);
   if(newOnes.length>0){
     meta.achievements=[...unlocked];
     meta.diamonds=(meta.diamonds||0)+newOnes.length;
@@ -311,10 +353,41 @@ function checkAchievements(s){
     if(!s.dead){
       newOnes.forEach(id=>{
         const ach=ACHIEVEMENTS.find(a=>a.id===id);
-        if(ach) s._achNotifQueue.push({...ach,timer:200});
+        if(ach) showAchievementNotif(ach);
       });
     }
   }
+}
+
+// ---- HTML notification helpers ----
+let _biomeNotifTimer = null;
+function showBiomeNotif(name) {
+  const el = document.getElementById('biome-notif');
+  document.getElementById('bn-title').textContent = '⬢ ' + name.toUpperCase();
+  el.classList.remove('show');
+  // Force reflow so the transition fires again
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(_biomeNotifTimer);
+  _biomeNotifTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+let _achNotifQueue = [], _achNotifActive = false;
+function showAchievementNotif(ach) {
+  _achNotifQueue.push(ach);
+  if (!_achNotifActive) _nextAchNotif();
+}
+function _nextAchNotif() {
+  if (_achNotifQueue.length === 0) { _achNotifActive = false; return; }
+  _achNotifActive = true;
+  const ach = _achNotifQueue.shift();
+  const el = document.getElementById('ach-notif');
+  document.getElementById('an-icon').textContent = ach.icon;
+  document.getElementById('an-name').textContent = ach.name;
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  setTimeout(() => { el.classList.remove('show'); setTimeout(_nextAchNotif, 350); }, 2800);
 }
 
 function openAchievements(){ renderAchievements(); document.getElementById('ach-screen').classList.add('show'); }
@@ -421,9 +494,9 @@ const SHOP_ITEMS = [
   {
     icon: h=>['🛡','🛡️','🔰','⚜️','👑','🏆'][(h._shieldTier||0)%6],
     name: h=>`Shield Upgrade (Tier ${(h._shieldTier||0)+1})`,
-    desc: h=>`+1 Defense per upgrade. DEF now: ${h.defense}`,
+    desc: h=>`+1 Max HP per upgrade. HP now: ${h.maxHp}`,
     cost: h=>Math.round(55*Math.pow(1.33,(h._shieldTier||0))),
-    apply: h=>{ h.defense+=1; h._shieldTier=(h._shieldTier||0)+1; },
+    apply: h=>{ h.maxHp+=1; h.hp=Math.min(h.hp+1,h.maxHp); h._shieldTier=(h._shieldTier||0)+1; },
   },
 ];
 
@@ -446,10 +519,10 @@ function pickUpgrades(){
 
 // ---- Meta Progression ----
 const META_PERKS = [
-  { id:'hp',    icon:'❤️',  name:'+2 Max HP',       desc:'Start every run with +2 HP',       cost:3,  max:5, apply:(h)=>{ h.maxHp+=2; h.hp+=2; }},
-  { id:'atk',   icon:'⚔️',  name:'+1 Attack',       desc:'Start every run +1 stronger',       cost:5,  max:3, apply:(h)=>{ h.atkPow+=1; }},
-  { id:'def',   icon:'🛡️',  name:'+1 Defense',      desc:'Start every run more armored',      cost:4,  max:3, apply:(h)=>{ h.defense+=1; }},
-  { id:'coins', icon:'🪙',  name:'+80 Start Coins',  desc:'Begin each run with extra coins',   cost:6,  max:3, apply:(h,s)=>{ s.coinCount+=80; }},
+  { id:'hp',    icon:'❤️',  name:'+2 Max HP',       desc:'Start every run with +2 HP',       cost:3,  apply:(h)=>{ h.maxHp+=2; h.hp+=2; }},
+  { id:'atk',   icon:'⚔️',  name:'+1 Attack',       desc:'Start every run +1 stronger',       cost:5,  apply:(h)=>{ h.atkPow+=1; }},
+  { id:'def',   icon:'🛡️',  name:'+1 Max HP',       desc:'Start every run with extra HP',     cost:4,  apply:(h)=>{ h.maxHp+=1; h.hp+=1; }},
+  { id:'coins', icon:'🪙',  name:'+80 Start Coins',  desc:'Begin each run with extra coins',   cost:6,  apply:(h,s)=>{ s.coinCount+=80; }},
   { id:'sword', icon:'🗡️',  name:'Start with Sword', desc:'Begin with Sword Lv.1 equipped',   cost:15, max:1, apply:(h)=>{ h.weapons.sword.level=1; h._weaponPath='sword'; }},
   { id:'gun',   icon:'🔫',  name:'Start with Gun',   desc:'Begin with Gun Lv.1 equipped',     cost:15, max:1, apply:(h)=>{ h.weapons.gun.level=1; h._weaponPath='gun'; }},
   { id:'vampi', icon:'🧛',  name:'Vampirism',        desc:'Start with Vampirism perk active',  cost:12, max:1, apply:(h)=>{ h._vampirism=true; }},
@@ -493,7 +566,7 @@ function createState() {
     worldX:0, keys:{}, frameCount:0,
     cameraY:0, skySegments:new Set(), skyAlert:0, inSkyKingdom:false,
     reachedSkyKingdom:false, _coinMult:1, _popups:[],
-    bossSpawned:false, diamonds:[],
+    bossSpawned:false, diamonds:[], hearts:[],
     biomeAlert:0, biomeAlertName:'', lastBiomeName:'',
     _visitedBiomes:new Set(), _killCount:0, _bossKilled:false, _achNotifQueue:[],
   };
@@ -565,6 +638,17 @@ function generateChunk(s, fromX) {
   if(Math.random()<0.06){
     s.diamonds.push({x:fromX+80+Math.random()*640,y:GROUND-34,w:28,h:28,collected:false});
   }
+  // Heart (+1 maxHp) — rarer than coins, slightly more common than treasures (~8% per chunk)
+  if(Math.random()<0.08){
+    // Place on a random platform or just above ground
+    const allPlats=s.platforms.filter(p=>p.x>=fromX&&p.type==='platform');
+    if(allPlats.length>0){
+      const rp=allPlats[Math.floor(Math.random()*allPlats.length)];
+      s.hearts.push({x:rp.x+rp.w/2-10,y:rp.y-26,w:20,h:20,collected:false});
+    } else {
+      s.hearts.push({x:fromX+100+Math.random()*600,y:GROUND-34,w:20,h:20,collected:false});
+    }
+  }
   // Dragon Boss — spawns once at biome 14 (~7000m)
   if(!s.bossSpawned && s.distance>=7000 && fromX>=7200){
     s.bossSpawned=true;
@@ -602,14 +686,14 @@ function spawnEnemy(x,type,lvl,diff,dist){
   const xpMult=Math.max(1,1+dist/2000);
   const base={x,y:GROUND,w:30,h:34,vx:0,vy:0,onGround:false,facing:-1,type,tier,dead:false,hitTimer:0,animFrame:0,animTimer:0,patrolDir:Math.random()<0.5?1:-1,patrolTimer:0,_orbCd:0};
   switch(type){
-    case 'walker': {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.5)*diff));return{...base,hp,maxHp:hp,atk,speed:1+lvl*0.15,xpVal:Math.floor((4+lvl*2)*xpMult),color:strengthColor(hp,atk)};}
-    case 'jumper': {const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.7)*diff));return{...base,hp,maxHp:hp,atk,speed:1.5+lvl*0.2,xpVal:Math.floor((6+lvl*2)*xpMult),color:strengthColor(hp,atk),w:24,h:28,jumpCd:0};}
+    case 'walker': {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.5)*diff));return{...base,hp,maxHp:hp,atk,speed:0.7+lvl*0.10,xpVal:Math.floor((4+lvl*2)*xpMult),color:strengthColor(hp,atk)};}
+    case 'jumper': {const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.7)*diff));return{...base,hp,maxHp:hp,atk,speed:1.0+lvl*0.15,xpVal:Math.floor((6+lvl*2)*xpMult),color:strengthColor(hp,atk),w:24,h:28,jumpCd:0};}
     case 'shooter':{const hp=2+lvl,pAtk=Math.max(1,Math.floor((1+lvl*0.6)*diff));return{...base,hp,maxHp:hp,atk:0,speed:0.4,xpVal:Math.floor((8+lvl*3)*xpMult),color:strengthColor(hp,pAtk),shootCd:0,projAtk:pAtk};}
     case 'heavy':   {const hp=8+lvl*2,atk=Math.max(1,Math.floor((2+lvl)*diff));return{...base,hp,maxHp:hp,atk,speed:0.4+lvl*0.06,xpVal:Math.floor((12+lvl*4)*xpMult),color:strengthColor(hp,atk),w:40,h:44};}
-    case 'horned':  {const hp=4+lvl,atk=Math.max(2,Math.floor((2+lvl*0.8)*diff));return{...base,hp,maxHp:hp,atk,speed:0.85+lvl*0.09,xpVal:Math.floor((7+lvl*2)*xpMult),color:strengthColor(hp,atk),w:32,h:32,chargeTimer:0};}
-    case 'poisoner':{const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.4)*diff));return{...base,hp,maxHp:hp,atk,speed:1.2+lvl*0.1,xpVal:Math.floor((9+lvl*2)*xpMult),color:'#44cc44',w:26,h:30,_poisonAtk:true};}
+    case 'horned':  {const hp=4+lvl,atk=Math.max(2,Math.floor((2+lvl*0.8)*diff));return{...base,hp,maxHp:hp,atk,speed:0.6+lvl*0.07,xpVal:Math.floor((7+lvl*2)*xpMult),color:strengthColor(hp,atk),w:32,h:32,chargeTimer:0};}
+    case 'poisoner':{const hp=3+lvl,atk=Math.max(1,Math.floor((1+lvl*0.4)*diff));return{...base,hp,maxHp:hp,atk,speed:0.8+lvl*0.08,xpVal:Math.floor((9+lvl*2)*xpMult),color:'#44cc44',w:26,h:30,_poisonAtk:true};}
     case 'large':   {const hp=20+lvl*4,atk=Math.max(2,Math.floor((2+lvl*1.2)*diff));return{...base,hp,maxHp:hp,atk,speed:0.32+lvl*0.03,xpVal:Math.floor((18+lvl*5)*xpMult),color:strengthColor(hp,atk),w:52,h:52};}
-    case 'fast':    {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.3)*diff));return{...base,hp,maxHp:hp,atk,speed:2.8+lvl*0.18,xpVal:Math.floor((8+lvl*2)*xpMult),color:'#ffcc00',w:20,h:26};}
+    case 'fast':    {const hp=2+lvl,atk=Math.max(1,Math.floor((1+lvl*0.3)*diff));return{...base,hp,maxHp:hp,atk,speed:1.8+lvl*0.12,xpVal:Math.floor((8+lvl*2)*xpMult),color:'#ffcc00',w:20,h:26};}
     default: return base;
   }
 }
@@ -689,9 +773,18 @@ function update(s) {
   const gunKey = s.keys['c']||s.keys['C'];
   const fbKey  = s.keys['v']||s.keys['V'];
 
-  if(left)       {h.vx=-spd;h.facing=-1;}
-  else if(right) {h.vx= spd;h.facing= 1;}
-  else h.vx*=0.7;
+  const curBiome=getBiome(s.distance);
+  const isIcy=curBiome.name==='Snow'||curBiome.name==='Ice Cave';
+  if(isIcy&&h.onGround){
+    // Icy ground: slow acceleration + very low friction so player slides
+    if(left)       { h.vx=Math.max(h.vx-0.55,-spd); h.facing=-1; }
+    else if(right) { h.vx=Math.min(h.vx+0.55, spd); h.facing= 1; }
+    else h.vx*=0.975;
+  } else {
+    if(left)       {h.vx=-spd;h.facing=-1;}
+    else if(right) {h.vx= spd;h.facing= 1;}
+    else h.vx*=0.7;
+  }
 
   if(h._jumpSpringTimer>0) h._jumpSpringTimer--;
   const effJump = h.jumpPow + (h._jumpSpringTimer>0?2:0);
@@ -793,6 +886,7 @@ function update(s) {
   s.enemies=s.enemies.filter(e=>e.x+e.w>cullX&&!e.dead);
   s.powerups=s.powerups.filter(pu=>pu.x>cullX);
   s.diamonds=s.diamonds.filter(d=>d.x>cullX);
+  if(s.hearts) s.hearts=s.hearts.filter(ht=>ht.x>cullX);
   projectiles=projectiles.filter(p=>p.x>cullX&&p.x<s.camera+W/gameZoomX+100);
 
   // Hero poison (from poisoner enemies)
@@ -845,6 +939,19 @@ function update(s) {
   }
   s.diamonds=s.diamonds.filter(d=>!d.collected);
 
+  // Heart collection (+1 maxHp)
+  if(s.hearts){
+    for(const ht of s.hearts){
+      if(!ht.collected&&rectOverlap(h,ht)){
+        ht.collected=true;
+        h.maxHp+=1; h.hp=Math.min(h.hp+1,h.maxHp);
+        spawnParticles(s,ht.x+ht.w/2,ht.y+ht.h/2,'#ff4466',10);
+        s._popups.push({x:ht.x+ht.w/2,y:ht.y-8,text:'❤️ +1 HP!',life:100,vy:-0.8});
+      }
+    }
+    s.hearts=s.hearts.filter(ht=>!ht.collected);
+  }
+
   for(const e of s.enemies) updateEnemy(s,e);
 
   // Projectile update
@@ -878,10 +985,9 @@ function update(s) {
   const bm=getBiome(s.distance);
   if(!s._visitedBiomes) s._visitedBiomes=new Set();
   s._visitedBiomes.add(bm.name);
-  if(s.lastBiomeName && bm.name!==s.lastBiomeName){ s.biomeAlert=200; s.biomeAlertName=bm.name; }
+  if(s.lastBiomeName && bm.name!==s.lastBiomeName){ showBiomeNotif(bm.name); }
   s.lastBiomeName=bm.name;
   if(s.frameCount%90===0) checkAchievements(s);
-  if(s.biomeAlert>0) s.biomeAlert--;
   document.getElementById('ui-lvl').textContent=h.lvl;
   document.getElementById('ui-xp').textContent=Math.floor(h.xp);
   document.getElementById('ui-xnxt').textContent=h.xpNext;
@@ -1191,6 +1297,7 @@ function draw(s){
   drawBiomeDecorations(s,bm);
   drawPlatforms(s,bm);
   drawDiamonds(s);
+  drawHearts(s);
   drawCoins(s);
   drawPowerups(s);
   drawEnemies(s);
@@ -1637,22 +1744,16 @@ function drawPlatforms(s,bm){
       continue;
     }
     if(p.type==='pit'){
-      const pitH=H-GROUND+10;
-      // Gradient: dark void at top → glowing lava at bottom
-      const pitGr=ctx.createLinearGradient(p.x,GROUND,p.x,GROUND+pitH);
-      pitGr.addColorStop(0,'rgba(6,0,0,0.96)');
-      pitGr.addColorStop(0.6,'rgba(50,4,0,0.92)');
-      pitGr.addColorStop(1,'rgba(220,35,0,0.9)');
-      ctx.fillStyle=pitGr;ctx.fillRect(p.x,GROUND,p.w,pitH);
-      // Animated lava glow strip at base
-      const lA=0.45+0.35*Math.sin(s.frameCount*0.07+p.x*0.01);
-      ctx.fillStyle=`rgba(255,80,0,${lA})`;ctx.fillRect(p.x,GROUND+pitH-10,p.w,10);
-      // Glowing red border + top-edge warning
-      ctx.save();ctx.strokeStyle='rgba(255,45,0,0.75)';ctx.lineWidth=2;
-      ctx.strokeRect(p.x+1,GROUND,p.w-2,pitH-2);
-      ctx.fillStyle=`rgba(255,60,0,${0.6+0.3*Math.sin(s.frameCount*0.1+p.x)})`;
-      ctx.fillRect(p.x,GROUND,p.w,4);
-      ctx.restore();
+      const pitH=H-GROUND+20;
+      // Simple dark void
+      ctx.fillStyle='rgba(0,0,0,0.98)';
+      ctx.fillRect(p.x,GROUND,p.w,pitH);
+      // Ground-colored edge caps on left and right so it looks carved out of the ground
+      const capW=Math.min(8,p.w/4);
+      ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(p.x-capW,GROUND,capW,8);
+      ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(p.x-capW,GROUND,capW,3);
+      ctx.fillStyle=rgb(bm.gnd);ctx.fillRect(p.x+p.w,GROUND,capW,8);
+      ctx.fillStyle=rgb(bm.gndA);ctx.fillRect(p.x+p.w,GROUND,capW,3);
       continue;
     }
     ctx.fillStyle=rgb(bm.plt);ctx.fillRect(p.x,p.y,p.w,p.h);
@@ -1728,6 +1829,34 @@ function drawDiamonds(s){
     ctx.beginPath();ctx.moveTo(0,-r*1.1);ctx.lineTo(r*0.85,0);ctx.lineTo(0,r*1.1);ctx.lineTo(-r*0.85,0);ctx.closePath();ctx.fill();
     ctx.fillStyle='rgba(255,255,255,0.5)';
     ctx.beginPath();ctx.moveTo(0,-r*1.1);ctx.lineTo(r*0.85,0);ctx.lineTo(0,-r*0.2);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawHearts(s){
+  if(!s.hearts) return;
+  const t=s.frameCount;
+  for(const ht of s.hearts){
+    if(ht.x<s.camera-40||ht.x>s.camera+W/gameZoomX+40) continue;
+    const bob=Math.sin(t*0.09+ht.x*0.02)*3;
+    const cx=ht.x+ht.w/2, cy=ht.y+ht.h/2+bob;
+    const r=ht.w/2;
+    ctx.save();
+    // Pulse glow
+    ctx.globalAlpha=0.35+0.25*Math.sin(t*0.1);
+    ctx.fillStyle='#ff4466';
+    ctx.beginPath();ctx.arc(cx,cy,r*1.55,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // Heart shape
+    ctx.fillStyle='#ff2244';
+    ctx.beginPath();
+    ctx.moveTo(cx,cy+r*0.9);
+    ctx.bezierCurveTo(cx-r*1.2,cy-r*0.2, cx-r*1.2,cy-r*0.9, cx,cy-r*0.45);
+    ctx.bezierCurveTo(cx+r*1.2,cy-r*0.9, cx+r*1.2,cy-r*0.2, cx,cy+r*0.9);
+    ctx.fill();
+    // Highlight
+    ctx.globalAlpha=0.45;ctx.fillStyle='#ffaabb';
+    ctx.beginPath();ctx.arc(cx-r*0.3,cy-r*0.15,r*0.28,0,Math.PI*2);ctx.fill();
     ctx.restore();
   }
 }
@@ -2154,59 +2283,6 @@ function drawHUD(s){
   }
   ctx.textAlign='left';
 
-  // Biome entry notification — responsive sizing
-  if(s.biomeAlert>0){
-    const elapsed=200-s.biomeAlert;
-    const fadeIn=Math.min(1,elapsed/12);
-    const fadeOut=s.biomeAlert<40?s.biomeAlert/40:1;
-    const a=fadeIn*fadeOut;
-    const bw=Math.min(W,Math.round(340*sc));
-    const bh=Math.round(52*sc);
-    const bfMain=Math.round(15*sc);
-    const bfSub=Math.round(10*sc);
-    const slideOff=Math.round(Math.max(0,1-elapsed/12)*-(bh+8));
-    const ny=Math.round(6*sc)+slideOff;
-    ctx.save();ctx.globalAlpha=a;
-    ctx.fillStyle='rgba(8,6,20,0.88)';
-    ctx.fillRect(W/2-bw/2,ny,bw,bh);
-    ctx.strokeStyle='#ffd700';ctx.lineWidth=Math.max(1,Math.round(1.5*sc));
-    ctx.strokeRect(W/2-bw/2,ny,bw,bh);
-    ctx.fillStyle='#ffd700';ctx.font=`bold ${bfMain}px monospace`;ctx.textAlign='center';
-    ctx.fillText('⬢ '+s.biomeAlertName.toUpperCase(),W/2,ny+Math.round(bh*0.46));
-    ctx.fillStyle='#888';ctx.font=`${bfSub}px monospace`;
-    ctx.fillText('NEW BIOME',W/2,ny+Math.round(bh*0.82));
-    ctx.textAlign='left';ctx.restore();
-  }
-  // In-game achievement unlock notification (slides up from bottom)
-  if(s._achNotifQueue&&s._achNotifQueue.length>0){
-    const ach=s._achNotifQueue[0];
-    ach.timer--;
-    if(ach.timer<=0){ s._achNotifQueue.shift(); }
-    else{
-      const elapsed2=200-ach.timer;
-      const a2=Math.min(1,elapsed2/10)*Math.min(1,ach.timer/25);
-      const aw=Math.round(285*sc),ah=Math.round(46*sc);
-      const ax=Math.round((W-aw)/2);
-      const slideUp=Math.round(Math.max(0,1-elapsed2/10)*(ah+10));
-      const ay=H-Math.round(12*sc)-ah+slideUp;
-      ctx.save();ctx.globalAlpha=a2;
-      ctx.fillStyle='rgba(10,5,28,0.92)';
-      ctx.fillRect(ax,ay,aw,ah);
-      ctx.strokeStyle='#cc88ff';ctx.lineWidth=Math.max(1,Math.round(1.5*sc));
-      ctx.strokeRect(ax,ay,aw,ah);
-      ctx.font=`${Math.round(20*sc)}px serif`;ctx.textAlign='left';
-      ctx.fillStyle='#fff';
-      ctx.fillText(ach.icon,ax+Math.round(8*sc),ay+Math.round(ah*0.7));
-      ctx.fillStyle='#cc88ff';ctx.font=`bold ${Math.round(9*sc)}px monospace`;
-      ctx.fillText('ACHIEVEMENT UNLOCKED',ax+Math.round(36*sc),ay+Math.round(ah*0.38));
-      ctx.fillStyle='#ffd700';ctx.font=`bold ${Math.round(13*sc)}px monospace`;
-      ctx.fillText(ach.name,ax+Math.round(36*sc),ay+Math.round(ah*0.72));
-      ctx.fillStyle='#aa77ff';ctx.font=`${Math.round(10*sc)}px monospace`;ctx.textAlign='right';
-      ctx.fillText('+1 💎',ax+aw-Math.round(8*sc),ay+Math.round(ah*0.56));
-      ctx.textAlign='left';ctx.restore();
-    }
-  }
-
   // Sky Kingdom alert
   if(s.skyAlert>0){
     const a=Math.min(1,s.skyAlert/60);
@@ -2338,11 +2414,11 @@ function renderMetaShop(){
   cont.innerHTML='';
   META_PERKS.forEach(perk=>{
     const owned=meta.perks[perk.id]||0;
-    const maxed=owned>=perk.max;
+    const maxed=perk.max!=null&&owned>=perk.max;
     const can=!maxed&&meta.diamonds>=perk.cost;
     const div=document.createElement('div');
     div.className='shop-item'+(maxed?' maxed':can?'':' cant-afford');
-    const badge=owned>0?`<span class="wlvl">${owned}/${perk.max}</span>`:'';
+    const badge=owned>0?(perk.max!=null?`<span class="wlvl">${owned}/${perk.max}</span>`:`<span class="wlvl">${owned}</span>`):'';
     div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${badge}</div><div class="s-desc">${perk.desc}</div><div class="s-cost">${maxed?'✓ MAX':'💎 '+perk.cost}</div>`;
     if(can) div.onclick=()=>{ meta.diamonds-=perk.cost; meta.perks[perk.id]=(meta.perks[perk.id]||0)+1; saveMeta(meta); renderMetaShop(); };
     cont.appendChild(div);
