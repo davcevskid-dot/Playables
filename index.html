@@ -180,7 +180,7 @@
 <div id="scale-wrapper">
 <div id="ui">
   <span>LVL <span id="ui-lvl">1</span> &nbsp;XP <span id="ui-xp">0</span>/<span id="ui-xnxt">20</span></span>
-  <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0</span>m &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
+  <span>🪙<span id="ui-coins">0</span> &nbsp; <span id="ui-dist">0m</span> &nbsp; <span id="ui-biome" style="color:#aaf">Plains</span></span>
   <span>HP <span id="ui-hp">5</span>/<span id="ui-mhp">5</span> &nbsp;ATK <span id="ui-atk">1</span> &nbsp;DEF <span id="ui-def">0</span></span>
 </div>
 </div>
@@ -277,7 +277,31 @@ const W = canvas.width, H = canvas.height;
 let GROUND = H - 60;
 let gameZoomX = 1, gameZoomY = 1;
 const SKY_THRESHOLD = -350; // world-y below this = Sky Kingdom
-const SKY_BIOME = { name:'Sky Kingdom', sky0:[135,206,250], sky1:[255,255,255], gnd:[200,230,255], gndA:[255,255,255], plt:[220,240,255], pltA:[255,255,255], bg:[170,220,255], bgA:0.25 };
+// Layer 4 summit reaches y≈-140 to -240. Jetpack stops thrusting above this y.
+const JETPACK_CEIL = -200; // cannot fly above layer-4 summit area with jetpack
+const SKY_X_THRESHOLD = 8000;
+
+// ---- Sky Biomes (World 2 — 5 zones, each covers 400m of sky distance) ----
+const SKY_BIOMES = [
+  { name:'Nimbus Fields',   sky0:[100,190,250], sky1:[160,220,255], gnd:[200,235,255], gndA:[230,248,255], plt:[170,215,255], pltA:[215,238,255], bg:[140,205,250], bgA:0.28 },
+  { name:'Sun Lands',       sky0:[250,190,50],  sky1:[255,220,110], gnd:[255,235,100], gndA:[255,248,160], plt:[240,205,80],  pltA:[255,225,130], bg:[255,215,70],  bgA:0.35 },
+  { name:'Aurora Heights',  sky0:[50,210,180],  sky1:[100,240,210], gnd:[80,230,200],  gndA:[130,255,220], plt:[70,220,190],  pltA:[120,245,215], bg:[60,200,175],  bgA:0.40 },
+  { name:"Angel's Realm",   sky0:[240,200,255], sky1:[255,225,255], gnd:[245,220,255], gndA:[255,240,255], plt:[235,210,250], pltA:[252,232,255], bg:[240,215,255], bgA:0.30 },
+  { name:'Celestial Void',  sky0:[20,10,65],    sky1:[45,20,110],   gnd:[30,18,85],    gndA:[65,42,140],   plt:[40,24,105],   pltA:[75,52,150],   bg:[55,22,110],   bgA:0.55 },
+];
+const SKY_ZONE_LEN = 400; // metres per sky biome
+function getSkyBiome(skyDist){
+  const rawIdx = Math.min(skyDist / SKY_ZONE_LEN, SKY_BIOMES.length - 0.01);
+  const idx = Math.floor(rawIdx), t = rawIdx - idx;
+  const blend = t > 0.75 ? (t - 0.75) / 0.25 : 0;
+  const cur = SKY_BIOMES[idx], nxt = SKY_BIOMES[Math.min(idx+1, SKY_BIOMES.length-1)];
+  return { name: blend > 0.5 ? nxt.name : cur.name,
+    sky0:lerpRGB(cur.sky0,nxt.sky0,blend), sky1:lerpRGB(cur.sky1,nxt.sky1,blend),
+    gnd:lerpRGB(cur.gnd,nxt.gnd,blend),   gndA:lerpRGB(cur.gndA,nxt.gndA,blend),
+    plt:lerpRGB(cur.plt,nxt.plt,blend),   pltA:lerpRGB(cur.pltA,nxt.pltA,blend),
+    bg:lerpRGB(cur.bg,nxt.bg,blend),      bgA:cur.bgA+(nxt.bgA-cur.bgA)*blend,
+    isSky:true };
+}
 
 // ---- Biomes (20) ----
 const BIOMES = [
@@ -477,7 +501,6 @@ const GUN_CD      = [0, 38, 30, 24, 20, 16];
 const FB_DMG      = [0, 8, 12, 18, 25, 34];
 const FB_RADIUS   = [0, 55, 72, 92, 112, 135];
 const FB_CD       = [0, 100, 85, 68, 52, 38];
-const SKY_X_THRESHOLD = 8000; // distance before sky enemies go ultra-hard
 
 // ---- Weapon mode collectibles ----
 const GUN_MODES = {
@@ -582,6 +605,7 @@ function createState() {
     bossSpawned:false, diamonds:[], hearts:[], stars:[], jetpacks:[],
     biomeAlert:0, biomeAlertName:'', lastBiomeName:'',
     _biomeFlash:0, _biomeFlashCol:[0,0,0],
+    skyDistance:0, skyEntryX:0, lastSkyBiomeName:'',
     _visitedBiomes:new Set(), _killCount:0, _bossKilled:false, _achNotifQueue:[],
   };
 }
@@ -838,8 +862,8 @@ function update(s) {
       spawnParticles(s,h.x+h.w/2+8,h.y+h.h,'#e0e8ff',2);
     }
   }
-  // Jetpack thrust — activated by holding jump while airborne
-  if(jump && !h.onGround && h._jetpackFuel>0){
+  // Jetpack thrust — activated by holding jump while airborne, capped at layer-4 height
+  if(jump && !h.onGround && h._jetpackFuel>0 && h.y > JETPACK_CEIL){
     h.vy=Math.max(h.vy-0.55,-8);
     h._jetpackFuel--;
     if(s.frameCount%2===0) spawnParticles(s,h.x+h.w/2,h.y+h.h,'#ff6600',2);
@@ -893,11 +917,17 @@ function update(s) {
   // Dynamic vertical lerp: faster tracking when hero moves fast (wings/falling).
   const vertLerp=Math.min(0.92,0.1+Math.abs(h.vy)*0.018);
   s.cameraY+=(targetCY-s.cameraY)*vertLerp;
-  s.distance=Math.max(s.distance,Math.floor(h.x/10));
+  // Ground distance only advances while not in Sky Kingdom
+  if(!s.inSkyKingdom) s.distance=Math.max(s.distance,Math.floor(h.x/10));
   if(s.worldX<s.camera+W/gameZoomX+400){generateChunk(s,s.worldX);s.worldX+=800;}
   const wasInSky=s.inSkyKingdom;
   s.inSkyKingdom=h.y<SKY_THRESHOLD;
-  if(s.inSkyKingdom&&!wasInSky){s.skyAlert=240;s.reachedSkyKingdom=true;}
+  if(s.inSkyKingdom&&!wasInSky){
+    s.skyAlert=240; s.reachedSkyKingdom=true;
+    if(!s.skyEntryX) s.skyEntryX=h.x; // record entry point once
+  }
+  // Sky distance advances only in sky kingdom
+  if(s.inSkyKingdom) s.skyDistance=Math.max(s.skyDistance,Math.floor((h.x-s.skyEntryX)/10));
   // Once player has reached World 2 (Sky Kingdom), falling back out = death
   if(s.reachedSkyKingdom&&wasInSky&&!s.inSkyKingdom&&!s.dead){
     spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#ff0000',16);
@@ -1050,26 +1080,38 @@ function update(s) {
   for(const p of s._popups){p.y+=p.vy;p.life--;}
   s._popups=s._popups.filter(p=>p.life>0);
 
-  const bm=getBiome(s.distance);
+  // Active biome — sky biome in World 2, ground biome otherwise
+  const bm = s.inSkyKingdom ? getSkyBiome(s.skyDistance) : getBiome(s.distance);
   if(!s._visitedBiomes) s._visitedBiomes=new Set();
-  s._visitedBiomes.add(bm.name);
-  if(s.lastBiomeName && bm.name!==s.lastBiomeName){
-    showBiomeNotif(bm.name);
-    s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+  if(!s.inSkyKingdom) s._visitedBiomes.add(bm.name);
+  if(s.inSkyKingdom){
+    // Sky biome transitions
+    if(s.lastSkyBiomeName && bm.name!==s.lastSkyBiomeName){
+      showBiomeNotif('☁️ '+bm.name);
+      s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+    }
+    s.lastSkyBiomeName=bm.name;
+  } else {
+    // Ground biome transitions
+    if(s.lastBiomeName && bm.name!==s.lastBiomeName){
+      showBiomeNotif(bm.name);
+      s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+    }
+    s.lastBiomeName=bm.name;
   }
   if(s._biomeFlash>0) s._biomeFlash--;
-  s.lastBiomeName=bm.name;
   if(s.frameCount%90===0) checkAchievements(s);
   document.getElementById('ui-lvl').textContent=h.lvl;
   document.getElementById('ui-xp').textContent=Math.floor(h.xp);
   document.getElementById('ui-xnxt').textContent=h.xpNext;
   document.getElementById('ui-coins').textContent=s.coinCount;
-  document.getElementById('ui-dist').textContent=s.distance;
+  // World 2: show sky distance with cloud icon; World 1: show ground distance
+  document.getElementById('ui-dist').textContent=s.inSkyKingdom?'☁️ '+s.skyDistance+'m':s.distance+'m';
   document.getElementById('ui-hp').textContent=h.hp;
   document.getElementById('ui-mhp').textContent=h.maxHp;
   document.getElementById('ui-atk').textContent=h.atkPow;
   document.getElementById('ui-def').textContent=h.defense;
-  document.getElementById('ui-biome').textContent=bm.name;
+  document.getElementById('ui-biome').textContent=s.inSkyKingdom?'W2: '+bm.name:bm.name;
 }
 
 function calcDmg(h){
@@ -1364,8 +1406,10 @@ function draw(s){
   ctx.save();
   ctx.scale(gameZoomX,gameZoomY);
   ctx.translate(-s.camera,-s.cameraY);
-  const bm=getBiome(s.distance);
-  drawBackground(s,bm);
+  // World 2 uses sky biome for all visual systems; World 1 uses ground biome
+  const bm = s.inSkyKingdom ? getSkyBiome(s.skyDistance) : getBiome(s.distance);
+  const groundBm = getBiome(s.distance); // always ground biome for background blend
+  drawBackground(s,bm,groundBm);
   drawBiomeDecorations(s,bm);
   drawPlatforms(s,bm);
   drawDiamonds(s);
@@ -1383,14 +1427,16 @@ function draw(s){
   drawHUD(s);
 }
 
-function drawBackground(s,bm){
+function drawBackground(s,bm,groundBm){
   const VW=W/gameZoomX,VH=H/gameZoomY;
   const cy=s.cameraY||0;
-  // Blend toward Sky Kingdom as hero flies higher
+  // While transitioning upward from ground → sky, blend ground biome toward first sky biome
   const skyBlend=Math.max(0,Math.min(1,(-s.hero.y-100)/300));
+  const skyTarget=getSkyBiome(s.skyDistance||0);
+  const src=groundBm||bm; // source is always the ground biome during transition
   const sBm=skyBlend>0?{
-    sky0:lerpRGB(bm.sky0,SKY_BIOME.sky0,skyBlend),sky1:lerpRGB(bm.sky1,SKY_BIOME.sky1,skyBlend),
-    bg:lerpRGB(bm.bg,SKY_BIOME.bg,skyBlend),bgA:bm.bgA+(SKY_BIOME.bgA-bm.bgA)*skyBlend,
+    sky0:lerpRGB(src.sky0,skyTarget.sky0,skyBlend),sky1:lerpRGB(src.sky1,skyTarget.sky1,skyBlend),
+    bg:lerpRGB(src.bg,skyTarget.bg,skyBlend),bgA:src.bgA+(skyTarget.bgA-src.bgA)*skyBlend,
   }:bm;
   const grd=ctx.createLinearGradient(s.camera,cy,s.camera,cy+VH);
   grd.addColorStop(0,rgb(sBm.sky0));grd.addColorStop(1,rgb(sBm.sky1));
@@ -1428,6 +1474,78 @@ function drawBackground(s,bm){
 function drawBiomeDecorations(s,bm){
   const VW=W/gameZoomX, t=s.frameCount, cx=s.camera;
   const name=bm.name;
+  // ---- Sky Kingdom decorations (World 2) ----
+  if(s.inSkyKingdom){
+    ctx.save();
+    const cy=s.cameraY||0;
+    if(name==='Nimbus Fields'){
+      // Fluffy white clouds drifting slowly
+      ctx.fillStyle='rgba(255,255,255,0.55)';
+      for(let i=0;i<7;i++){
+        const hx=((cx*0.25+i*520)%(VW+600))+cx-300;
+        const hy=cy+30+i*55+Math.sin(t*0.012+i)*12;
+        const r=40+i*10;
+        ctx.beginPath();ctx.arc(hx,hy,r,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(hx+r*0.7,hy+8,r*0.7,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(hx-r*0.6,hy+10,r*0.65,0,Math.PI*2);ctx.fill();
+      }
+    } else if(name==='Sun Lands'){
+      // Big golden sun + light rays
+      const sx=cx+VW*0.15, sy=cy+VH*0.2;
+      ctx.save();ctx.globalAlpha=0.18+0.06*Math.sin(t*0.02);
+      ctx.fillStyle='#ffe040';ctx.beginPath();ctx.arc(sx,sy,130,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle='#ffd700';ctx.beginPath();ctx.arc(sx,sy,65,0,Math.PI*2);ctx.fill();
+      // Rays
+      ctx.globalAlpha=0.25;ctx.strokeStyle='#ffe800';ctx.lineWidth=4;
+      for(let i=0;i<12;i++){const a=i/12*Math.PI*2+t*0.005;ctx.beginPath();ctx.moveTo(sx+Math.cos(a)*75,sy+Math.sin(a)*75);ctx.lineTo(sx+Math.cos(a)*140,sy+Math.sin(a)*140);ctx.stroke();}
+      ctx.restore();
+    } else if(name==='Aurora Heights'){
+      // Aurora wave ribbons
+      for(let band=0;band<4;band++){
+        const hue=[(0.35),(0.48),(0.55),(0.62)][band];
+        ctx.globalAlpha=0.18+0.08*Math.sin(t*0.015+band*1.2);
+        ctx.strokeStyle=`hsl(${Math.round(hue*360)},80%,65%)`;ctx.lineWidth=22;
+        ctx.beginPath();
+        for(let px=0;px<VW+80;px+=10){
+          const py=cy+80+band*70+Math.sin((cx+px)*0.006+t*0.014+band)*55;
+          px===0?ctx.moveTo(cx+px,py):ctx.lineTo(cx+px,py);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    } else if(name==="Angel's Realm"){
+      // Sparkling divine particles + halo rings
+      ctx.globalAlpha=0.35+0.2*Math.sin(t*0.018);
+      ctx.fillStyle='#fff8ff';
+      for(let i=0;i<14;i++){
+        const hx=((cx*0.15+i*350)%(VW+200))+cx-100;
+        const hy=cy+20+i*38+Math.sin(t*0.02+i*0.8)*20;
+        const r=1.5+Math.sin(t*0.05+i)*1;
+        ctx.beginPath();ctx.arc(hx,hy,r*4,0,Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    } else if(name==='Celestial Void'){
+      // Stars + nebula wisps
+      ctx.fillStyle='#ffffff';
+      for(let i=0;i<40;i++){
+        const hx=((cx*0.05+i*231)%(VW+60))+cx-30;
+        const hy=cy+12+((i*137)%(s.cameraY?Math.abs(s.cameraY)+220:220));
+        const brightness=0.4+0.6*Math.abs(Math.sin(t*0.04+i));
+        ctx.globalAlpha=brightness;
+        ctx.beginPath();ctx.arc(hx,hy,1+Math.random()*0.5,0,Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=0.12;ctx.fillStyle='#8844ff';
+      for(let i=0;i<4;i++){
+        const hx=((cx*0.2+i*680)%(VW+400))+cx-200;
+        const hy=cy+50+i*120;
+        ctx.beginPath();ctx.ellipse(hx,hy,160,60,t*0.003+i,0,Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    }
+    ctx.restore();
+    return; // skip ground biome decorations in sky kingdom
+  }
   ctx.save();
 
   if(name==='Plains'){
@@ -2571,7 +2689,8 @@ function goToMainMenu(){
 }
 function showGameOver(s){
   checkAchievements(s);
-  document.getElementById('go-stats').innerHTML=`Level ${s.hero.lvl} &nbsp; Distance ${s.distance}m &nbsp; Coins ${s.coinCount}`;
+  const distStr=s.reachedSkyKingdom?`🌍 ${s.distance}m → ☁️ ${s.skyDistance}m`:s.distance+'m';
+  document.getElementById('go-stats').innerHTML=`Level ${s.hero.lvl} &nbsp; ${distStr} &nbsp; Coins ${s.coinCount}`;
   const meta=loadMeta();
   document.getElementById('go-diamonds').textContent='💎 Total Diamonds: '+meta.diamonds;
   document.getElementById('gameover').style.display='block';
