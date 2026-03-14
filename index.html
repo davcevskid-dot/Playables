@@ -9,6 +9,8 @@
     if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     document.removeEventListener('touchstart', tryFullscreen);
+    // FIX 6C: init audio on first touch (browser autoplay policy)
+    if(typeof initAudio==='function'){ initAudio(); resumeAudio(); }
   }, {once: true, passive: true});
   window.addEventListener('contextmenu', e => e.preventDefault());
 </script>
@@ -106,6 +108,18 @@
   .settings-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 10px; }
   .btn-danger { padding: 10px 28px; background: #660000; border: 2px solid #aa0000; border-radius: 8px; color: #ffaaaa; font-size: 14px; cursor: pointer; font-family: monospace; }
   .btn-danger:hover { background: #880000; }
+  /* Audio toggle buttons */
+  .audio-toggles { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+  .toggle-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 20px; border-radius: 10px; cursor: pointer; font-family: monospace; font-size: 14px;
+    border: 2px solid #444; background: #1a1a2e; color: #aaa; transition: all 0.15s;
+    user-select: none;
+  }
+  .toggle-btn.on  { border-color: #44cc44; background: rgba(40,120,40,0.25); color: #88ee88; }
+  .toggle-btn.off { border-color: #cc4444; background: rgba(80,20,20,0.25); color: #ee8888; }
+  .toggle-btn .t-icon { font-size: 20px; }
+  .toggle-btn .t-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
 
   /* Notification overlays */
   #biome-notif, #ach-notif {
@@ -195,14 +209,29 @@
   #mc-left { display: flex; align-items: center; justify-content: flex-start; }
   #mc-right { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
   .mc-btn {
-    width: 56px; height: 56px;
+    width: 64px; height: 64px;
     background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.22);
-    border-radius: 14px; color: #fff; font-size: 22px; cursor: pointer;
+    border-radius: 14px; color: #fff; font-size: 24px; cursor: pointer;
     user-select: none; -webkit-user-select: none; touch-action: none;
     -webkit-tap-highlight-color: transparent; outline: none;
     display: flex; align-items: center; justify-content: center;
     transition: background 0.08s, transform 0.08s; font-family: serif;
   }
+  /* FIX 4A: Landscape lock overlay */
+  #rotate-overlay {
+    display: none; position: fixed; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.95); z-index: 999; flex-direction: column;
+    align-items: center; justify-content: center; color: #fff; font-family: monospace; text-align: center;
+  }
+  #rotate-overlay .ro-icon { font-size: 64px; margin-bottom: 16px; animation: ro-spin 2s ease-in-out infinite; }
+  #rotate-overlay .ro-text { font-size: 18px; color: #ffd700; margin-bottom: 8px; }
+  #rotate-overlay .ro-sub  { font-size: 13px; color: #888; }
+  #rotate-overlay .ro-skip { margin-top: 22px; padding: 9px 28px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; color: #aaa; font-size: 13px; cursor: pointer; font-family: monospace; }
+  #rotate-overlay .ro-skip:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  @keyframes ro-spin { 0%,100%{transform:rotate(0deg)} 40%,60%{transform:rotate(90deg)} }
+  /* Only show on portrait mobile — never on desktop (min-width:600px) */
+  @media (orientation: portrait) and (max-width: 599px) { #rotate-overlay { display: flex; } }
+  @media (min-width: 600px) { #rotate-overlay { display: none !important; } }
   .mc-btn:active { background: rgba(255,255,255,0.32); transform: scale(0.91); }
   .mc-jump { background: rgba(64,128,255,0.18); border-color: rgba(100,160,255,0.45); font-size: 28px; }
   .mc-atk  { background: rgba(255,200,0,0.18);  border-color: rgba(255,200,0,0.45);  }
@@ -255,6 +284,13 @@
 </style>
 </head>
 <body>
+<!-- FIX 4A: Portrait lock overlay -->
+<div id="rotate-overlay">
+  <div class="ro-icon">📱</div>
+  <div class="ro-text">Rotate your device</div>
+  <div class="ro-sub">FORWARD! plays best in landscape mode</div>
+  <button class="ro-skip" onclick="document.getElementById('rotate-overlay').style.display='none'">▶ Play anyway</button>
+</div>
 <div id="scale-wrapper">
   <!-- FIX #2B: Icon-based HUD -->
   <div id="ui">
@@ -304,6 +340,7 @@
   <h2>⏸ PAUSED</h2>
   <button class="pause-resume" onclick="resumeGame()">▶ Resume</button>
   <button class="pause-shop"   onclick="resumeAndShop()">🛒 Open Shop</button>
+  <button onclick="openSettings()" style="display:block;width:100%;margin-bottom:10px;padding:10px;font-size:15px;font-family:monospace;border:none;border-radius:8px;cursor:pointer;color:#fff;background:#2a1a3e">⚙️ Settings</button>
   <button class="pause-menu"   onclick="goToMainMenu()">🏠 Main Menu</button>
 </div>
 
@@ -379,8 +416,27 @@
 <!-- FIX #22C: Settings screen — hard reset lives here -->
 <div id="settings-screen" class="overlay">
   <h2>⚙️ Settings</h2>
+
+  <p style="color:#888;font-size:12px;margin-bottom:12px;letter-spacing:2px">── AUDIO ──</p>
+  <div class="audio-toggles">
+    <div class="toggle-btn" id="music-toggle-btn" onclick="toggleMusic()">
+      <span class="t-icon">🎵</span>
+      <div>
+        <div class="t-label">Music</div>
+        <div id="music-toggle-status" style="font-size:12px;font-weight:bold">ON</div>
+      </div>
+    </div>
+    <div class="toggle-btn" id="sfx-toggle-btn" onclick="toggleSFX()">
+      <span class="t-icon">🔊</span>
+      <div>
+        <div class="t-label">Sound FX</div>
+        <div id="sfx-toggle-status" style="font-size:12px;font-weight:bold">ON</div>
+      </div>
+    </div>
+  </div>
+
+  <p style="color:#888;font-size:12px;margin-bottom:12px;letter-spacing:2px">── DANGER ZONE ──</p>
   <div class="settings-row">
-    <p style="color:#aaa;font-size:13px;margin-bottom:14px">Danger zone — these actions are irreversible.</p>
     <button class="btn-danger" onclick="confirmHardReset()">🗑️ Hard Reset — Delete ALL data</button>
     <p style="color:#555;font-size:11px;margin-top:4px">Deletes diamonds, perks, achievements, and scores.</p>
   </div>
@@ -590,8 +646,9 @@ function getDangerLevel(s){
 function updateDangerBar(s){
   const pct = getDangerLevel(s) * 100;
   document.getElementById('danger-bar-fill').style.width = pct + '%';
-  document.getElementById('danger-world-label').textContent = s.inSkyKingdom ? 'W2' : 'W1';
-  // Color label based on danger
+  // FIX 9B: show night icon when dark in World 1
+  const worldLabel = s.inSkyKingdom ? 'W2' : (s._isNight ? '🌙 W1' : '☀️ W1');
+  document.getElementById('danger-world-label').textContent = worldLabel;
   const col = pct < 33 ? '#44ff44' : pct < 66 ? '#ffff00' : '#ff4400';
   document.getElementById('danger-label').style.color = col;
 }
@@ -683,7 +740,10 @@ function renderAchievements(){
   });
 }
 
-function openSettings(){ document.getElementById('settings-screen').classList.add('show'); }
+function openSettings(){
+  document.getElementById('settings-screen').classList.add('show');
+  _updateAudioToggleUI(); // sync toggle buttons to current state
+}
 function closeSettings(){ document.getElementById('settings-screen').classList.remove('show'); }
 function confirmHardReset(){
   if(confirm('⚠️ PERMANENT HARD RESET\n\nThis will delete ALL diamonds, perks, achievements, scores, and skins.\n\nThis CANNOT be undone. Are you absolutely sure?')){
@@ -782,15 +842,22 @@ const UPGRADE_POOL = [
   { icon:'🧛', name:'Vampirism',   desc:'10% chance to heal 1 HP on kill',rarity:'common', apply:h=>{ h._vampirism=true; }},
   { icon:'🔁', name:'Ricochet',    desc:'Bullets bounce once off walls',  rarity:'common', apply:h=>{ h._ricochet=true; }},
   { icon:'🩸', name:'Thorns',      desc:'Melee attackers take 2 dmg back',rarity:'common', apply:h=>{ h._thorns=(h._thorns||0)+2; }},
-  { icon:'💨', name:'Dash Ready',  desc:'Double-tap direction to dash',   rarity:'common', apply:h=>{ h._dashEnabled=true; }},
-  { icon:'🌱', name:'Regen',       desc:'Heal 1 HP every 30 seconds',     rarity:'common', apply:h=>{ h._regenRate=(h._regenRate||0)+1800; }},
-  { icon:'🔮', name:'Arcane Surge', desc:'+15% fireball damage',          rarity:'common', apply:h=>{ h._fbMult=(h._fbMult||1)*1.15; }},
-  { icon:'💥', name:'Armor Break', desc:'Attacks reduce enemy defense',   rarity:'common', apply:h=>{ h._armorBreak=true; }},
+  { icon:'🦅', name:'Jump Boost',   desc:'+1 jump power (stackable, max 3)',  rarity:'common',
+    condition: h=>(h._jumpBoostCount||0)<3,
+    apply:h=>{ h.jumpPow+=1; h._jumpBoostCount=(h._jumpBoostCount||0)+1; }},
+  { icon:'💨', name:'Dash Ready',   desc:'Double-tap direction to dash',       rarity:'common',
+    condition: h=>!h._dashEnabled,
+    apply:h=>{ h._dashEnabled=true; }},
+  { icon:'🌱', name:'Regen',        desc:'Heal 1 HP every 30 seconds',         rarity:'common', apply:h=>{ h._regenRate=(h._regenRate||0)+1800; }},
+  { icon:'🔮', name:'Arcane Surge', desc:'+15% fireball damage',               rarity:'common', apply:h=>{ h._fbMult=(h._fbMult||1)*1.15; }},
+  { icon:'💥', name:'Armor Break',  desc:'Attacks reduce enemy defense',        rarity:'common', apply:h=>{ h._armorBreak=true; }},
   // Rare
-  { icon:'🧨', name:'Explosive Rounds',desc:'Gun bullets AoE on hit (small radius)', rarity:'rare', apply:h=>{ h._explosiveBullets=true; }},
-  { icon:'🌊', name:'Chain Frost', desc:'Freeze effects spread to 2 nearby enemies', rarity:'rare', apply:h=>{ h._chainFrost=true; }},
-  { icon:'💎', name:'Coin Storm',  desc:'Instantly gain 300 coins + +50% coin drops this run', rarity:'rare', apply:(_,s)=>{ s.coinCount+=300; s._coinMult=(s._coinMult||1)*1.5; }},
-  { icon:'🦅', name:'Soaring',     desc:'+50% jump height + double jump free', rarity:'rare', apply:h=>{ h.jumpPow+=2; h._doubleJump=true; }},
+  { icon:'🧨', name:'Explosive Rounds', desc:'Gun bullets AoE on hit (small radius)', rarity:'rare', apply:h=>{ h._explosiveBullets=true; }},
+  { icon:'🌊', name:'Chain Frost',  desc:'Freeze effects spread to 2 nearby enemies', rarity:'rare', apply:h=>{ h._chainFrost=true; }},
+  { icon:'💎', name:'Coin Storm',   desc:'Instantly gain 300 coins + +50% coin drops this run', rarity:'rare', apply:(_,s)=>{ s.coinCount+=300; s._coinMult=(s._coinMult||1)*1.5; }},
+  { icon:'🦅', name:'Soaring',      desc:'+50% jump height + double jump free',rarity:'rare',
+    condition: h=>!h._doubleJump,
+    apply:h=>{ h.jumpPow+=2; h._doubleJump=true; }},
   // Legendary
   { icon:'☄️', name:'Meteor Strike', desc:'Kills cause a small meteor to fall on nearby enemies', rarity:'legendary', apply:h=>{ h._meteorStrike=true; }},
   { icon:'👁️', name:'Third Eye',   desc:'All crits deal 4× dmg instead of 2×', rarity:'legendary', apply:h=>{ h._critMult=4; }},
@@ -854,6 +921,19 @@ const META_PERKS = [
   { id:'godstar', icon:'⭐',name:'God Star',           desc:'Start run with an activatable 10s god mode star', cost:20, apply:(h)=>{ h._startGodStar=(h._startGodStar||0)+1; }},
   { id:'orbs',    icon:'🔮',name:'Start with Orbs',    desc:'Begin with Orb Shield Lv.1',            cost:20, max:1, apply:(h)=>{ h.weapons.orbs.level=1; }},
   { id:'armor',   icon:'🛡️',name:'+1 Starting Defense',desc:'Begin with 1 point of defense',        cost:10, apply:(h)=>{ h.defense+=1; }},
+  // FIX 3C: Achievement-gated perks — only appear after specific achievements unlocked
+  { id:'dragonfire', icon:'🐉',name:'Dragonfire Sword', desc:'Sword attacks leave burning DoT. Unlock: Dragon Slayer achievement.',
+    cost:30, max:1, gate:'boss_kill', apply:(h)=>{ h._dragonfireSword=true; }},
+  { id:'skyborn',  icon:'☁️', name:'Skyborn',           desc:'Start with Wings pre-equipped. Unlock: Ascension achievement.',
+    cost:35, max:1, gate:'sky', apply:(h)=>{ h._wings=true; }},
+  { id:'veteran',  icon:'🗡️', name:'Veteran Instincts', desc:'+2 ATK and +3 Max HP. Unlock: Veteran (50 kills) achievement.',
+    cost:20, max:1, gate:'kill_50', apply:(h)=>{ h.atkPow+=2; h.maxHp+=3; h.hp+=3; }},
+  { id:'marathoner',icon:'🗺️',name:'Marathoner',        desc:'+15% run speed permanently. Unlock: 2km Explorer achievement.',
+    cost:15, max:1, gate:'dist_2k', apply:(h)=>{ h.speed*=1.15; }},
+  { id:'legend',   icon:'🏆', name:'Legend Aura',        desc:'XP gain +30% and crit chance +15%. Unlock: 5km Legend achievement.',
+    cost:40, max:1, gate:'dist_5k', apply:(h)=>{ h._xpMult=(h._xpMult||1)*1.3; h._crit=(h._crit||0)+0.15; }},
+  { id:'hoarder',  icon:'👑', name:'Coin Hoarder Start', desc:'Begin with 250 coins. Unlock: Gold Hoarder achievement.',
+    cost:18, max:1, gate:'coins_1k', apply:(h,s)=>{ s.coinCount+=250; }},
 ];
 
 // ============================================================
@@ -906,7 +986,8 @@ function createState(startInSky) {
       _doubleJump:false, _tripleJump:false, _jumpsUsed:0, _jumpWasDown:false,
       _weaponPath:null, _gunMode:null, _swordMode:null, _poison:null,
       _jetpackFuel:0, _jetpackMax:300, _godTimer:0,
-      _thorns:0, _dashEnabled:false, _dashTimer:0, _lastDirKey:null, _lastDirTime:0,
+      _thorns:0, _dashEnabled:false, _dashTimer:0, _lastDirKey:null,
+      _dashLastDir:0, _dashLastTime:0, _jumpBoostCount:0,
       _regenTimer:0, _regenRate:0, _ricochet:false, _armorBreak:false,
       _meteorStrike:false, _critMult:2, _bloodfire:false, _thunderfist:false, _absoluteZero:false,
       _explosiveBullets:false, _chainFrost:false, _fbMult:1,
@@ -927,6 +1008,16 @@ function createState(startInSky) {
     _miniBossesSpawned:{},
     // FIX #6C: world tracking
     _startInSky: !!startInSky,
+    // FIX 5B: cache diamond count + skin in state to avoid loadMeta every frame
+    _diamondCount: loadMeta().diamonds || 0,
+    _activeSkin: loadMeta().activeSkin || 'default',
+    // FIX 7C: screen shake + hit-stop
+    _shakeTimer:0, _shakeMag:0, _hitStop:0,
+    // FIX 8C: boss intro cinematic
+    _bossIntroTimer:0, _bossIntroName:'',
+    // FIX 9B: day/night cycle — World 1 only. Full cycle = 10800 frames (3 min at 60fps)
+    // isNight=true when in night half. dawnFlash fires briefly at dawn to kill on-screen enemies.
+    _dayNightTimer:0, _isNight:false, _dawnFlash:0, _nightMult:1,
   };
   return s;
 }
@@ -1007,7 +1098,9 @@ function generateChunk(s, fromX) {
     s.enemies.push({ x:fromX+250,y:GROUND-70,w:80,h:60,vx:0,vy:0,onGround:false,facing:-1,
       type:'dragon',tier:3,dead:false,hitTimer:0,animFrame:0,animTimer:0,
       hp:3000,maxHp:3000,atk:20,speed:1.8,xpVal:500,color:'#cc2200',defense:0,
-      flySine:0,_orbCd:0,_breathCd:0,_wingFlap:0,patrolDir:-1,patrolTimer:0 });
+      flySine:0,_orbCd:0,_breathCd:0,_wingFlap:0,patrolDir:-1,patrolTimer:0,
+      // FIX 8C: phase tracking
+      _phase:1, _introPlayed:false, _enrageFlashTimer:0 });
     s.diamonds.push({x:fromX+500,y:GROUND-34,w:28,h:28,collected:false});
     s.diamonds.push({x:fromX+560,y:GROUND-34,w:28,h:28,collected:false});
   }
@@ -1026,7 +1119,9 @@ function generateChunk(s, fromX) {
       jumpCd:0, shootCd:0, projAtk:bAtk, chargeTimer:0 });
     s._popups.push({x:fromX+300,y:GROUND-80,text:'⚠️ MINI-BOSS!',life:180,vy:-0.5});
   }
-  const numE=Math.min(6, Math.floor(1 + density * 160 * diffMult));
+  // FIX 5B: Cap enemies — never more than 20 live on screen
+  const liveEnemies = s.enemies.filter(e=>!e.dead).length;
+  const numE=Math.min(6, Math.max(0, Math.min(20-liveEnemies, Math.floor(1 + density * 160 * diffMult))));
   for(let i=0;i<numE;i++){
     const ex=fromX+200+Math.random()*700;
     s.enemies.push(spawnEnemy(ex, pickEnemyType(lvl,s.distance), lvl, diffMult, s.distance));
@@ -1089,6 +1184,7 @@ function generateSkyChunk(s, fromX) {
     s.platforms.push({x,y,w,h:20,type:'cloud'});
     for(let j=0;j<2+Math.floor(Math.random()*3);j++) s.coins.push({x:x+j*30+Math.random()*10,y:y-22,w:16,h:16,val:coinVal*2,collected:false});
   }
+  // Angel enemy
   if(Math.random()<0.5){
     const ex=fromX+50+Math.random()*500, ey=SKY_FLOOR_Y-80-Math.random()*150;
     const isUltra = s.distance >= SKY_X_THRESHOLD; const isElite = s.distance >= 4000;
@@ -1100,6 +1196,38 @@ function generateSkyChunk(s, fromX) {
       type:'angel',tier:isUltra?3:isElite?2:1,dead:false,hitTimer:0,animFrame:0,animTimer:0,
       hp,maxHp:hp,atk,speed:spd,xpVal,color,defense:def,flySine:Math.random()*Math.PI*2,isUltra,isElite});
   }
+  // FIX 2A: Cherub — tiny fast swarmer, spawns in groups of 2-3
+  if(Math.random()<0.45){
+    const count=2+Math.floor(Math.random()*2);
+    for(let c=0;c<count;c++){
+      const ex=fromX+80+Math.random()*440+c*60, ey=SKY_FLOOR_Y-60-Math.random()*120;
+      const hp=40+Math.floor(s.skyDistance/200), atk=3+Math.floor(s.skyDistance/500);
+      s.enemies.push({x:ex,y:ey,w:16,h:16,vx:0,vy:0,onGround:false,facing:-1,
+        type:'cherub',tier:1,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+        hp,maxHp:hp,atk,speed:2.4,xpVal:15+Math.floor(s.skyDistance/300),
+        color:'#ffaacc',defense:0,flySine:Math.random()*Math.PI*2,_dashCd:0});
+    }
+  }
+  // FIX 2A: Golem — slow tanky cloud golem, drops lots of coins
+  if(Math.random()<0.25){
+    const ex=fromX+150+Math.random()*300, ey=SKY_FLOOR_Y-20;
+    const hp=200+Math.floor(s.skyDistance/100), atk=8+Math.floor(s.skyDistance/400);
+    s.enemies.push({x:ex,y:ey,w:48,h:52,vx:0,vy:0,onGround:false,facing:-1,
+      type:'golem',tier:2,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+      hp,maxHp:hp,atk,speed:0.5,xpVal:60+Math.floor(s.skyDistance/150),
+      color:'#aaccff',defense:15,flySine:0,patrolDir:-1,patrolTimer:80});
+  }
+  // FIX 2A: Stormcloud — stationary, fires spread lightning bolts
+  if(Math.random()<0.30){
+    const ex=fromX+100+Math.random()*400, ey=SKY_FLOOR_Y-100-Math.random()*80;
+    const pAtk=5+Math.floor(s.skyDistance/300);
+    s.enemies.push({x:ex,y:ey,w:40,h:28,vx:0,vy:0,onGround:false,facing:-1,
+      type:'stormcloud',tier:1,dead:false,hitTimer:0,animFrame:0,animTimer:0,
+      hp:80+Math.floor(s.skyDistance/200),maxHp:80+Math.floor(s.skyDistance/200),
+      atk:0,speed:0,xpVal:25+Math.floor(s.skyDistance/250),
+      color:'#88aadd',defense:0,flySine:Math.random()*Math.PI*2,
+      shootCd:0,projAtk:pAtk,_boltTimer:0});
+  }
 }
 
 // ============================================================
@@ -1107,6 +1235,8 @@ function generateSkyChunk(s, fromX) {
 // ============================================================
 function update(s) {
   if(s.paused||s.dead) return;
+  // FIX 7C: hit-stop — skip physics update for N frames after a kill
+  if(s._hitStop>0){ s._hitStop--; return; }
   s.frameCount++;
   const h=s.hero;
   const spd=3*h.speed;
@@ -1132,16 +1262,24 @@ function update(s) {
     else h.vx*=0.7;
   }
 
-  // FIX #17 (Dash): Double-tap direction to dash
+  // Dash: double-tap detection — register key-DOWN edges only, not holds
   if(h._dashEnabled){
     const curDir = left?-1:right?1:0;
-    if(curDir!==0){
-      if(curDir===h._lastDirKey && s.frameCount-h._lastDirTime<12 && h._dashTimer<=0){
-        h.vx=curDir*18; h._dashTimer=25;
+    // Detect a fresh press (direction changed from neutral or opposite)
+    const prevDir = h._lastDirKey||0;
+    if(curDir!==0 && prevDir===0){
+      // Key just pressed from neutral — check if same direction as last tap within window
+      if(curDir===h._dashLastDir && s.frameCount-h._dashLastTime<18 && h._dashTimer<=0){
+        // Double-tap confirmed — dash!
+        h.vx=curDir*16; h._dashTimer=22;
+        h._dashLastDir=0; // consume the double-tap so it doesn't re-trigger
         spawnParticles(s,h.x+h.w/2,h.y+h.h/2,curDir===1?'#4488ff':'#ff8844',8);
+      } else {
+        // First tap — record it
+        h._dashLastDir=curDir; h._dashLastTime=s.frameCount;
       }
-      if(curDir!==h._lastDirKey){ h._lastDirKey=curDir; h._lastDirTime=s.frameCount; }
     }
+    h._lastDirKey=curDir; // track for edge detection
     if(h._dashTimer>0) h._dashTimer--;
   }
 
@@ -1155,6 +1293,7 @@ function update(s) {
     const power = h._jumpsUsed===0 ? 8+effJump*2.5 : 7+effJump*2.0;
     h.vy=-(power); h.onGround=false; h._jumpsUsed++;
     if(h._jumpsUsed>1) spawnParticles(s,h.x+h.w/2,h.y+h.h,'#aaddff',5);
+    queueSound('jump'); // FIX 6C
     // FIX #17 vanity: jump effects
     const meta=loadMeta();
     const jfx=meta.activeJumpFx||'default';
@@ -1188,9 +1327,10 @@ function update(s) {
     h.attackTimer=18;
     h.attackCooldown=Math.max(4,Math.floor((30-h.atkPow*2-swordLvl*3)*hm));
     doHeroAttack(s);
+    queueSound('sword'); // FIX 6C
   }
-  if(gunKey&&h.weapons.gun.level>0&&h.gunCooldown<=0) shootGun(s);
-  if(fbKey&&h.weapons.fireball.level>0&&h.fireballCooldown<=0) throwFireball(s);
+  if(gunKey&&h.weapons.gun.level>0&&h.gunCooldown<=0){ shootGun(s); queueSound('gun'); }
+  if(fbKey&&h.weapons.fireball.level>0&&h.fireballCooldown<=0){ throwFireball(s); queueSound('fireball'); }
 
   // Orb shield
   const orbLvl=h.weapons.orbs.level;
@@ -1274,7 +1414,12 @@ function update(s) {
     if(!c.collected&&rectOverlap(h,c)){
       c.collected=true; const gained=c.val||1; s.coinCount+=gained;
       spawnParticles(s,c.x+c.w/2,c.y+c.h/2,'#ffd700',gained>1?14:6);
-      if(c.isTreasure) s._popups.push({x:c.x+c.w/2,y:c.y-8,text:'+'+gained+' coins!',life:90,vy:-0.7});
+      if(c.isTreasure){
+        s._popups.push({x:c.x+c.w/2,y:c.y-8,text:'+'+gained+' coins!',life:90,vy:-0.7});
+        queueSound('chest'); // FIX 6C
+      } else {
+        queueSound('coin'); // FIX 6C
+      }
     }
   }
   s.coins=s.coins.filter(c=>!c.collected);
@@ -1296,7 +1441,12 @@ function update(s) {
   s.powerups=s.powerups.filter(pu=>!pu.collected);
 
   for(const d of s.diamonds){
-    if(!d.collected&&rectOverlap(h,d)){ d.collected=true; const meta=loadMeta(); meta.diamonds++; saveMeta(meta); spawnParticles(s,d.x+d.w/2,d.y+d.h/2,'#cc44ff',14); s._popups.push({x:d.x+d.w/2,y:d.y-8,text:'💎 +1 Diamond!',life:100,vy:-0.7}); }
+    if(!d.collected&&rectOverlap(h,d)){
+      d.collected=true; const meta=loadMeta(); meta.diamonds++; s._diamondCount=meta.diamonds; saveMeta(meta);
+      spawnParticles(s,d.x+d.w/2,d.y+d.h/2,'#cc44ff',14);
+      s._popups.push({x:d.x+d.w/2,y:d.y-8,text:'💎 +1 Diamond!',life:100,vy:-0.7});
+      queueSound('diamond'); // FIX 6C
+    }
   }
   s.diamonds=s.diamonds.filter(d=>!d.collected);
 
@@ -1341,22 +1491,64 @@ function update(s) {
   }
 
   for(const p of s.particles){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;}
+  // FIX 5B: return dead particles to pool
+  const deadP = s.particles.filter(p=>p.life<=0);
+  deadP.forEach(p=>_particlePool.push(p));
   s.particles=s.particles.filter(p=>p.life>0);
   for(const p of s._popups){p.y+=p.vy;p.life--;}
   s._popups=s._popups.filter(p=>p.life>0);
 
   const bm = s.inSkyKingdom ? getSkyBiome(s.skyDistance) : getBiome(s.distance);
   if(!s._visitedBiomes) s._visitedBiomes={};
-  if(!s.inSkyKingdom) s._visitedBiomes[bm.name]=true;   // FIX #14C: plain object
+  if(!s.inSkyKingdom) s._visitedBiomes[bm.name]=true;
   if(s.inSkyKingdom){
-    if(s.lastSkyBiomeName && bm.name!==s.lastSkyBiomeName){ showBiomeNotif('☁️ '+bm.name); s._biomeFlash=55; s._biomeFlashCol=bm.sky0; }
+    if(s.lastSkyBiomeName && bm.name!==s.lastSkyBiomeName){
+      showBiomeNotif('☁️ '+bm.name); s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+      _hookAudio(s); // FIX: music only on biome change
+    }
     s.lastSkyBiomeName=bm.name;
   } else {
-    if(s.lastBiomeName && bm.name!==s.lastBiomeName){ showBiomeNotif(bm.name); s._biomeFlash=55; s._biomeFlashCol=bm.sky0; }
+    if(s.lastBiomeName && bm.name!==s.lastBiomeName){
+      showBiomeNotif(bm.name); s._biomeFlash=55; s._biomeFlashCol=bm.sky0;
+      _hookAudio(s); // FIX: music only on biome change
+    }
     s.lastBiomeName=bm.name;
   }
   if(s._biomeFlash>0) s._biomeFlash--;
   if(s.frameCount%90===0) checkAchievements(s);
+
+  // FIX 9B: Day/Night cycle — World 1 only (not in Sky Kingdom)
+  if(!s.inSkyKingdom){
+    const CYCLE = 10800; // 3 min full cycle at 60fps
+    const HALF  = CYCLE/2;
+    s._dayNightTimer = (s._dayNightTimer||0)+1;
+    const phase = s._dayNightTimer % CYCLE;
+    const wasNight = s._isNight;
+    s._isNight = phase >= HALF;
+
+    // Transition: day → night
+    if(!wasNight && s._isNight){
+      s._biomeFlash=80; s._biomeFlashCol=[0,0,30];
+      showBiomeNotif('🌙 NIGHT FALLS — enemies are stronger!');
+      s._nightMult=2;
+      queueSound('nightfall'); // FIX 6C
+    }
+    if(wasNight && !s._isNight){
+      s._dawnFlash=55;
+      showBiomeNotif('🌅 DAWN — the light destroys all enemies!');
+      for(const e of s.enemies){
+        if(!e.dead && e.type!=='dragon'){
+          damageEnemy(s,e,99999);
+        }
+      }
+      s._nightMult=1;
+      spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#ffffaa',20);
+      queueSound('dawn'); // FIX 6C
+    }
+    if(s._dawnFlash>0) s._dawnFlash--;
+
+    // At night: enemies deal +25% damage and drop 2× coins+XP (handled via _nightMult applied in gainXP and drop value)
+  }
 
   // FIX #6C: Update danger bar
   updateDangerBar(s);
@@ -1397,6 +1589,8 @@ function doHeroAttack(s){
       if(mode==='lightning') chainLightning(s,e,Math.round(totalDmg*0.6));
       if(h._thunderfist)     chainLightning(s,e,Math.round(totalDmg*0.4));
       if(h._armorBreak)      e.defense=Math.max(0,(e.defense||0)-3);
+      // FIX 3C: Dragonfire sword — applies burning DoT on every melee hit
+      if(h._dragonfireSword) { e._poison={ticks:4,dmg:Math.max(2,Math.floor(totalDmg*0.35)),timer:25}; spawnParticles(s,e.x+e.w/2,e.y,'#ff4400',4); }
     }
   }
   if(hit) addCombo(s);
@@ -1409,8 +1603,8 @@ function addCombo(s){
   if(s._combo>s._maxCombo) s._maxCombo=s._combo;
   updateComboHUD(s._combo);
   // Combo XP bonus thresholds
-  if(s._combo===10) { gainXP(s,20); s._popups.push({x:s.hero.x+s.hero.w/2,y:s.hero.y-30,text:'🔥 HOT STREAK! +20XP',life:100,vy:-0.7}); }
-  if(s._combo===25) { gainXP(s,50); s._popups.push({x:s.hero.x+s.hero.w/2,y:s.hero.y-30,text:'💥 FRENZY! +50XP',life:120,vy:-0.8}); }
+  if(s._combo===10) { gainXP(s,20); s._popups.push({x:s.hero.x+s.hero.w/2,y:s.hero.y-30,text:'🔥 HOT STREAK! +20XP',life:100,vy:-0.7}); queueSound('combo10'); }
+  if(s._combo===25) { gainXP(s,50); s._popups.push({x:s.hero.x+s.hero.w/2,y:s.hero.y-30,text:'💥 FRENZY! +50XP',life:120,vy:-0.8}); queueSound('enrage'); }
 }
 
 function chainFreeze(s,src){
@@ -1476,18 +1670,27 @@ function damageEnemy(s,e,dmg){
   const actual=eDef>0?Math.max(1,Math.floor(dmg*100/(100+eDef))):dmg;
   e.hitTimer=12; e.hp-=actual;
   spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff4444',4);
+  // FIX 7C: floating damage number — white normal, yellow crit (large), red heavy
+  const isCrit = actual >= dmg*1.8;
+  const isHeavy = actual >= 15;
+  const dmgColor = isCrit?'#ffd700':isHeavy?'#ff6600':'#ffffff';
+  s._popups.push({x:e.x+e.w/2+(Math.random()-0.5)*20, y:e.y-4, text:(isCrit?'✦ ':'')+actual,
+    life:55, vy:-1.4-(actual*0.02), isDmgNum:true, dmgColor, scale:isCrit?1.4:isHeavy?1.15:0.9});
   if(e.hp<=0){
     e.dead=true; gainXP(s,e.xpVal);
     s._killCount=(s._killCount||0)+1;
     if(e.type==='dragon') s._bossKilled=true;
     spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ffaa00',12);
+    queueSound('kill'); // FIX 6C
+    // FIX 7C: 2-frame hit-stop on kill — bigger enemies get longer stop
+    s._hitStop = e.type==='dragon'?6 : e.w>=48?4 : 2;
     const baseVal=eDef>=200?15:1;
-    const drops=Math.floor(e.xpVal/4); const coinMult=s._coinMult||1;
+    const drops=Math.floor(e.xpVal/4);
+    const coinMult=(s._coinMult||1) * ((!s.inSkyKingdom&&s._isNight)?2:1);
     for(let i=0;i<drops;i++) s.coins.push({x:e.x+Math.random()*e.w,y:e.y,w:14,h:14,val:Math.round(baseVal*coinMult),collected:false});
     const h=s.hero;
     if(h._vampirism&&Math.random()<0.10){h.hp=Math.min(h.hp+1,h.maxHp);spawnParticles(s,h.x+h.w/2,h.y,'#ff0055',3);}
-    // FIX #17: Meteor strike perk
-    if(h._meteorStrike){ const mx=e.x+e.w/2; s._popups.push({x:mx,y:e.y-20,text:'☄️',life:40,vy:-2}); setTimeout(()=>explodeAt(s,mx,GROUND-30,80,h.atkPow*3),400); }
+    if(h._meteorStrike){ const mx=e.x+e.w/2, my=e.y; s._popups.push({x:mx,y:my-20,text:'☄️',life:40,vy:-2}); setTimeout(()=>{ if(state&&!state.dead) explodeAt(state,mx,GROUND-30,80,h.atkPow*3); },400); }
     if(e.type==='dragon'){
       s.powerups.push({x:e.x+e.w/2-16,y:e.y,w:32,h:32,path:'wings',modeKey:'wings',modeDef:{icon:'🪽',label:'Wings',color:'#e8f4ff'},collected:false,isWings:true});
       s._popups.push({x:e.x+e.w/2,y:e.y-20,text:'🪽 WINGS DROPPED!',life:180,vy:-0.5});
@@ -1500,18 +1703,21 @@ function heroHit(s,dmg){
   const h=s.hero;
   if(h.invTimer>0) return;
   if(h._shield){h._shield=false;h.invTimer=60;spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#00ccff',10);return;}
-  // FIX #17: Thorns
-  if((h._thorns||0)>0){
-    for(const e of s.enemies){ if(!e.dead&&rectOverlap(h,e)) damageEnemy(s,e,h._thorns); }
-  }
-  h.hp-=Math.max(1,dmg-h.defense); h.invTimer=60;
+  if((h._thorns||0)>0){ for(const e of s.enemies){ if(!e.dead&&rectOverlap(h,e)) damageEnemy(s,e,h._thorns); } }
+  const actualDmg = Math.max(1,dmg-h.defense);
+  h.hp-=actualDmg; h.invTimer=60;
   spawnParticles(s,h.x+h.w/2,h.y+h.h/2,'#ff0000',8); h.vy=-4;
-  s._combo=0; updateComboHUD(0); // Combo reset on hit
+  queueSound('hurt'); // FIX 6C
+  s._shakeTimer=18; s._shakeMag=Math.min(10, 3+actualDmg*0.6);
+  s._combo=0; updateComboHUD(0);
   if(h.hp<=0){h.hp=0;s.dead=true;showGameOver(s);}
 }
 
 function gainXP(s,amt){
-  const h=s.hero; h.xp+=amt*(h._xpMult||1);
+  const h=s.hero;
+  // FIX 9B: double XP at night in World 1
+  const nightBonus = (!s.inSkyKingdom && s._isNight) ? 2 : 1;
+  h.xp+=amt*(h._xpMult||1)*nightBonus;
   while(h.xp>=h.xpNext){h.xp-=h.xpNext;h.lvl++;h.xpNext=20+h.lvl*25;showLevelUp(s);}
 }
 
@@ -1530,15 +1736,96 @@ function updateEnemy(s,e){
       if(absDist<36&&Math.abs(h.y-e.y)<e.h+20&&h.invTimer<=0) heroHit(s,e.atk);}
     return;
   }
+  // FIX 2A: Cherub — tiny fast swarmer with short dash attack
+  if(e.type==='cherub'){
+    e.flySine=(e.flySine||0)+0.08; e.y+=Math.sin(e.flySine)*1.2;
+    if(e._dashCd>0) e._dashCd--;
+    const cherubAggro=absDist<280;
+    if(cherubAggro){
+      e.facing=dir;
+      if(e._dashCd<=0 && absDist<120){ e.vx=dir*8; e._dashCd=60; }
+      else { e.vx=dir*e.speed; }
+      e.x+=e.vx;
+      if(absDist<22&&Math.abs(h.y-e.y)<e.h+12&&h.invTimer<=0) heroHit(s,e.atk);
+    } else { e.vx*=0.85; }
+    return;
+  }
+  // FIX 2A: Golem — slow ground-walking tank, falls onto cloud floor
+  if(e.type==='golem'){
+    e.vy+=0.5; e.y+=e.vy;
+    if(e.y+e.h>=GROUND){e.y=GROUND-e.h;e.vy=0;e.onGround=true;}else e.onGround=false;
+    for(const p of s.platforms){ if(p.type==='pit') continue; if(rectOverlap(e,p)&&e.vy>=0&&e.y+e.h-e.vy<=p.y+2){e.y=p.y-e.h;e.vy=0;e.onGround=true;} }
+    if(absDist<340){e.vx=dir*e.speed;e.facing=dir;}
+    else{e.patrolTimer--;if(e.patrolTimer<=0){e.patrolDir*=-1;e.patrolTimer=80+Math.random()*60;}e.vx=e.patrolDir*e.speed*0.4;e.facing=e.patrolDir;}
+    e.x+=e.vx;
+    if(absDist<50&&Math.abs(h.y-e.y)<e.h+10&&h.invTimer<=0) heroHit(s,e.atk);
+    return;
+  }
+  // FIX 2A: Stormcloud — stationary, fires 3-bolt lightning spread
+  if(e.type==='stormcloud'){
+    e.flySine=(e.flySine||0)+0.02; e.y+=Math.sin(e.flySine)*0.6;
+    e._boltTimer=(e._boltTimer||0)+1;
+    if(e.shootCd>0) e.shootCd--;
+    if(e.shootCd<=0 && absDist<400){
+      e.shootCd=90; e.facing=dir;
+      for(let i=0;i<3;i++){
+        const spread=(i-1)*0.45;
+        s.projectiles.push({x:e.x+e.w/2,y:e.y+e.h/2,vx:dir*(3.5+Math.abs(spread)),vy:spread,
+          w:8,h:8,life:70,fromEnemy:true,hit:false,atk:e.projAtk,color:'#ffff44',gravity:0,isBolt:true});
+      }
+    }
+    return;
+  }
   if(e.type==='dragon'){
     e.flySine=(e.flySine||0)+0.03; e.y+=Math.sin(e.flySine)*1.4; e._wingFlap=(e._wingFlap||0)+1;
+    const hpPct = e.hp/e.maxHp;
+    // FIX 8C: Cinematic intro — pause game for 2s when player first gets close
+    if(!e._introPlayed && absDist<620){
+      e._introPlayed=true;
+      s.paused=true;
+      s._bossIntroTimer=130;
+      s._bossIntroName='🐉 VALDROS THE ETERNAL';
+      s._popups.push({x:e.x+e.w/2,y:e.y-40,text:'🐉 VALDROS THE ETERNAL',life:200,vy:-0.2});
+      spawnParticles(s,e.x+e.w/2,e.y,'#ff4400',30);
+      queueSound('boss_intro'); // FIX 6C
+      setTimeout(()=>{ if(state&&!state.dead) state.paused=false; },2200);
+    }
+    // FIX 8C: Phase 2 — enrage at 50% HP
+    if(e._phase===1 && hpPct<=0.5){
+      e._phase=2;
+      e.speed=e.speed*1.55;
+      e.atk=Math.round(e.atk*1.35);
+      e._breathCd=0;
+      e._enrageFlashTimer=90;
+      s._shakeTimer=25; s._shakeMag=9;
+      s._popups.push({x:e.x+e.w/2,y:e.y-55,text:'🔥 THE DRAGON ENRAGES!',life:200,vy:-0.25});
+      spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#ff2200',30);
+      queueSound('enrage'); // FIX 6C
+    }
+    if(e._phase===2 && hpPct<=0.25){
+      e._phase=3;
+      e.speed=e.speed*1.2;
+      e._breathCd=0;
+      e._enrageFlashTimer=120;
+      s._shakeTimer=30; s._shakeMag=12;
+      s._popups.push({x:e.x+e.w/2,y:e.y-55,text:'💀 VALDROS IS DESPERATE!',life:200,vy:-0.25});
+      spawnParticles(s,e.x+e.w/2,e.y+e.h/2,'#880000',30);
+      queueSound('enrage'); // FIX 6C phase 3
+    }
+    if(e._enrageFlashTimer>0) e._enrageFlashTimer--;
     const dragonAggro=absDist<500;
-    if(dragonAggro){
+    if(dragonAggro && !s.paused){
       e.vx=dir*e.speed; e.x+=e.vx; e.facing=dir;
       if(absDist<60&&Math.abs(h.y-e.y)<e.h+30&&h.invTimer<=0) heroHit(s,e.atk);
       e._breathCd=(e._breathCd||0)-1;
-      if(e._breathCd<=0&&absDist<320){ e._breathCd=65;
-        for(let i=0;i<3;i++) s.projectiles.push({x:e.x+(e.facing===1?e.w:0),y:e.y+e.h*0.4,vx:e.facing*(5+i*0.6),vy:(i-1)*0.9,w:14,h:14,life:60,fromEnemy:true,hit:false,atk:e.atk,color:'#ff4400',gravity:0.05});
+      const breathCooldown = e._phase===3?35 : e._phase===2?50 : 65;
+      const boltCount      = e._phase===3?5  : e._phase===2?4  : 3;
+      if(e._breathCd<=0&&absDist<320){
+        e._breathCd=breathCooldown;
+        for(let i=0;i<boltCount;i++) s.projectiles.push({
+          x:e.x+(e.facing===1?e.w:0),y:e.y+e.h*0.4,
+          vx:e.facing*(5+i*0.5),vy:(i-(boltCount-1)/2)*0.9,
+          w:14,h:14,life:60,fromEnemy:true,hit:false,atk:e.atk,color:'#ff4400',gravity:0.05});
       }
     }
     return;
@@ -1586,8 +1873,22 @@ function updateEnemy(s,e){
   }
 }
 
+// FIX 5B: Particle object pool — reuse dead objects instead of GC churn
+const _particlePool = [];
 function spawnParticles(s,x,y,color,count){
-  for(let i=0;i<count;i++) s.particles.push({x,y,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4-2,life:20+Math.random()*20,color,size:3+Math.random()*4});
+  // Cap total particles at 280 — cull oldest if over
+  const MAX_PARTICLES = 280;
+  for(let i=0;i<count;i++){
+    let p = _particlePool.pop() || {};
+    p.x=x; p.y=y;
+    p.vx=(Math.random()-0.5)*4; p.vy=(Math.random()-0.5)*4-2;
+    p.life=20+Math.random()*20; p.color=color; p.size=3+Math.random()*4;
+    s.particles.push(p);
+  }
+  if(s.particles.length > MAX_PARTICLES){
+    const excess = s.particles.splice(0, s.particles.length - MAX_PARTICLES);
+    excess.forEach(p => _particlePool.push(p));
+  }
 }
 
 // ============================================================
@@ -1595,7 +1896,22 @@ function spawnParticles(s,x,y,color,count){
 // ============================================================
 function draw(s){
   ctx.clearRect(0,0,W,H);
-  ctx.save(); ctx.scale(gameZoomX,gameZoomY); ctx.translate(-s.camera,-s.cameraY);
+  ctx.save();
+  ctx.scale(gameZoomX,gameZoomY);
+  // FIX 7C: screen shake — offset translate by random amount while shakeTimer > 0
+  let shakeX=0, shakeY=0;
+  if(s._shakeTimer>0 && isFinite(s._shakeMag)){
+    s._shakeTimer--;
+    const mag = Math.min(s._shakeMag, 12) * (s._shakeTimer/18);
+    shakeX=(Math.random()-0.5)*mag*2;
+    shakeY=(Math.random()-0.5)*mag;
+  } else {
+    s._shakeTimer=0; s._shakeMag=0; // reset if corrupt
+  }
+  // Guard against NaN/Infinity corrupting canvas transform
+  const safeShakeX = isFinite(shakeX) ? shakeX : 0;
+  const safeShakeY = isFinite(shakeY) ? shakeY : 0;
+  ctx.translate(-s.camera+safeShakeX, -s.cameraY+safeShakeY);
   const bm = s.inSkyKingdom ? getSkyBiome(s.skyDistance) : getBiome(s.distance);
   const groundBm = getBiome(s.distance);
   drawBackground(s,bm,groundBm);
@@ -1614,9 +1930,46 @@ function drawBackground(s,bm,groundBm){
   const skyTarget=getSkyBiome(s.skyDistance||0);
   const src=groundBm||bm;
   const sBm=skyBlend>0?{sky0:lerpRGB(src.sky0,skyTarget.sky0,skyBlend),sky1:lerpRGB(src.sky1,skyTarget.sky1,skyBlend),bg:lerpRGB(src.bg,skyTarget.bg,skyBlend),bgA:src.bgA+(skyTarget.bgA-src.bgA)*skyBlend}:bm;
+  // FIX 9B: night tint — smoothly darken sky in World 1 during night phase
+  let nightAlpha = 0;
+  if(!s.inSkyKingdom && (s._isNight||s._dawnFlash>0)){
+    const CYCLE=10800, HALF=CYCLE/2;
+    const phase=(s._dayNightTimer||0)%CYCLE;
+    if(s._isNight){
+      // Fade in over 180 frames at start of night, full dark mid-night
+      const nightPhase=phase-HALF;
+      nightAlpha=Math.min(0.62, nightPhase/180*0.62);
+    } else if(s._dawnFlash>0){
+      // Rapid bright fade at dawn
+      nightAlpha=0;
+    }
+  }
   const grd=ctx.createLinearGradient(s.camera,cy,s.camera,cy+VH);
   grd.addColorStop(0,rgb(sBm.sky0));grd.addColorStop(1,rgb(sBm.sky1));
   ctx.fillStyle=grd;ctx.fillRect(s.camera,cy,VW,VH);
+  // Night overlay
+  if(nightAlpha>0){
+    ctx.save(); ctx.globalAlpha=nightAlpha;
+    ctx.fillStyle='#000620'; ctx.fillRect(s.camera,cy,VW,VH);
+    // Stars visible at night
+    for(let i=0;i<60;i++){
+      const wx=s.camera+(i*137%(VW+100))-50, wy=cy+4+(i*71)%(VH*0.7);
+      ctx.globalAlpha=nightAlpha*(0.4+0.5*Math.abs(Math.sin(s.frameCount*0.03+i)));
+      ctx.fillStyle='#ffffff'; ctx.fillRect(wx,wy,1+((i*3)%2),1+((i*3)%2));
+    }
+    // Moon
+    const moonX=s.camera+VW*0.8, moonY=cy+VH*0.12;
+    ctx.globalAlpha=nightAlpha*0.9;
+    ctx.fillStyle='#fffde0'; ctx.beginPath(); ctx.arc(moonX,moonY,18,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#e0e8ff'; ctx.beginPath(); ctx.arc(moonX+6,moonY-4,14,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  // Dawn flash — white burst
+  if(s._dawnFlash>0){
+    ctx.save(); ctx.globalAlpha=(s._dawnFlash/55)*0.7;
+    ctx.fillStyle='#ffffcc'; ctx.fillRect(s.camera,cy,VW,VH);
+    ctx.restore();
+  }
   if(bm.isSpace&&skyBlend<0.5){
     for(let i=0;i<80;i++){const wx=s.camera+(i*137%(VW+200))-100,wy=cy+(i*71)%(VH-40);ctx.globalAlpha=0.4+0.4*Math.sin(s.frameCount*0.04+i*0.9);ctx.fillStyle='#fff';ctx.fillRect(wx,wy,1+(i%3===0?1:0),1+(i%3===0?1:0));}ctx.globalAlpha=1;
   }
@@ -1774,10 +2127,10 @@ function drawPlatforms(s,bm){
 }
 
 // FIX #17: Skin colors for hero
-function getSkinColor(meta){
-  const skin=meta.activeSkin||'default';
-  const map={default:'#4080ff',skin_red:'#cc2222',skin_green:'#228822',skin_gold:'#ccaa00',skin_dark:'#223344',skin_rainbow:null};
-  return map[skin]||'#4080ff';
+function getSkinColor(skinId){
+  // Always returns a valid color string
+  const map={'default':'#4080ff','skin_red':'#cc2222','skin_green':'#228822','skin_gold':'#ccaa00','skin_dark':'#223344'};
+  return map[skinId] || '#4080ff';
 }
 
 function drawPowerups(s){
@@ -1948,8 +2301,11 @@ function drawHero(s){
   const h=s.hero;
   if(h.invTimer>0&&Math.floor(h.invTimer/4)%2===0) return;
   const sLvl=h.weapons.sword.level, gLvl=h.weapons.gun.level, fLvl=h.weapons.fireball.level;
-  const meta=loadMeta();
-  const skinColor=meta.activeSkin==='skin_rainbow'?`hsl(${s.frameCount*3%360},80%,55%)`:getSkinColor(meta);
+  // Use state-cached skin — never call loadMeta in the draw loop
+  const activeSkin = s._activeSkin || 'default';
+  const skinColor = activeSkin==='skin_rainbow'
+    ? `hsl(${s.frameCount*3%360},80%,55%)`
+    : getSkinColor(activeSkin);
   ctx.save();
   ctx.translate(h.x+h.w/2,h.y+h.h/2);
   if(h.facing===-1) ctx.scale(-1,1);
@@ -2035,21 +2391,122 @@ function drawEnemies(s){
     }
     if(e.type==='dragon'){
       const flash=e.hitTimer>0;
-      ctx.save();ctx.translate(e.x+e.w/2,e.y+e.h/2);if(e.facing===-1)ctx.scale(-1,1);
+      const ph=e._phase||1;
+      // FIX 8C: phase-based body color and aura
+      const enrageFlash = (e._enrageFlashTimer||0)>0 && Math.floor(s.frameCount/4)%2===0;
+      const bodyCol   = flash||enrageFlash?'#ffffff': ph===3?'#550000': ph===2?'#991100':'#cc2200';
+      const wingCol   = flash||enrageFlash?'#ffffff': ph===3?'#330000': ph===2?'#660800':'#881100';
+      const auraCol   = ph===3?'#ff0000': ph===2?'#ff2200':'#ff4400';
+      const auraAlpha = ph===3?0.45: ph===2?0.32:0.22;
+      ctx.save(); ctx.translate(e.x+e.w/2,e.y+e.h/2); if(e.facing===-1)ctx.scale(-1,1);
       const wf=Math.sin((e._wingFlap||0)*0.15);
-      ctx.globalAlpha=0.22+0.12*Math.sin(s.frameCount*0.1);ctx.fillStyle='#ff4400';ctx.beginPath();ctx.arc(0,0,e.w/2+22,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
-      ctx.fillStyle=flash?'#fff':'#881100';ctx.beginPath();ctx.ellipse(-e.w*0.72,wf*8,e.w*0.42,e.h*0.3,0.3,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(e.w*0.72,wf*8,e.w*0.42,e.h*0.3,-0.3,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=flash?'#fff':'#cc2200';ctx.beginPath();ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=flash?'#fff':'#dd3300';ctx.beginPath();ctx.ellipse(e.w*0.42,-4,e.w*0.26,e.h*0.24,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#ffaa00';ctx.beginPath();ctx.moveTo(e.w*0.36,-e.h*0.28);ctx.lineTo(e.w*0.44,-e.h*0.52);ctx.lineTo(e.w*0.52,-e.h*0.26);ctx.fill();
-      ctx.fillStyle='#ffff00';ctx.beginPath();ctx.arc(e.w*0.48,-4,4,0,Math.PI*2);ctx.fill();ctx.fillStyle='#000';ctx.beginPath();ctx.arc(e.w*0.49,-4,2,0,Math.PI*2);ctx.fill();
+      // Aura glow — pulses faster in phase 3
+      const pulse = ph===3?0.22:ph===2?0.14:0.1;
+      ctx.globalAlpha=auraAlpha+pulse*Math.sin(s.frameCount*0.15);
+      ctx.fillStyle=auraCol; ctx.beginPath(); ctx.arc(0,0,e.w/2+22+(ph-1)*8,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle=wingCol; ctx.beginPath(); ctx.ellipse(-e.w*0.72,wf*8,e.w*0.42,e.h*0.3,0.3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(e.w*0.72,wf*8,e.w*0.42,e.h*0.3,-0.3,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=bodyCol; ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=flash||enrageFlash?'#ffffff':ph===3?'#660000':ph===2?'#aa1100':'#dd3300';
+      ctx.beginPath(); ctx.ellipse(e.w*0.42,-4,e.w*0.26,e.h*0.24,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ffaa00'; ctx.beginPath(); ctx.moveTo(e.w*0.36,-e.h*0.28); ctx.lineTo(e.w*0.44,-e.h*0.52); ctx.lineTo(e.w*0.52,-e.h*0.26); ctx.fill();
+      // Eye glows red in phase 2+
+      ctx.fillStyle=ph>=2?'#ff0000':'#ffff00'; ctx.beginPath(); ctx.arc(e.w*0.48,-4,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(e.w*0.49,-4,2,0,Math.PI*2); ctx.fill();
       ctx.restore();
-      const hbW=e.w+14;ctx.fillStyle='#333';ctx.fillRect(e.x-7,e.y-16,hbW,7);ctx.fillStyle='#ff2200';ctx.fillRect(e.x-7,e.y-16,hbW*(e.hp/e.maxHp),7);
-      ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.fillStyle='#ffaa00';ctx.fillText('🐉 DRAGON BOSS',e.x+e.w/2,e.y-20);ctx.textAlign='left';
+      const hbW=e.w+14;
+      ctx.fillStyle='#333'; ctx.fillRect(e.x-7,e.y-16,hbW,7);
+      // HP bar colour shifts red→dark red through phases
+      ctx.fillStyle=ph===3?'#880000':ph===2?'#cc0000':'#ff2200';
+      ctx.fillRect(e.x-7,e.y-16,hbW*(e.hp/e.maxHp),7);
+      const phaseLabel = ph===3?'💀 DESPERATE':'🔥 ENRAGED!';
+      ctx.font='bold 11px monospace'; ctx.textAlign='center';
+      ctx.fillStyle=ph>=2?'#ff4400':'#ffaa00';
+      ctx.fillText(ph>=2?phaseLabel:'🐉 DRAGON BOSS',e.x+e.w/2,e.y-20);
+      ctx.textAlign='left';
       continue;
     }
-    const tier=e.tier||0,flash=e.hitTimer>0,frozen=e._freeze&&e._freeze.dur>0,t=s.frameCount;
+    // FIX 2A: Cherub
+    if(e.type==='cherub'){
+      const flash=e.hitTimer>0;
+      ctx.save(); ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      if(e.facing===-1) ctx.scale(-1,1);
+      // Glow
+      ctx.globalAlpha=0.3+0.2*Math.sin(s.frameCount*0.18+e.x);
+      ctx.fillStyle='#ffaacc'; ctx.beginPath(); ctx.arc(0,0,e.w,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1;
+      // Body
+      ctx.fillStyle=flash?'#fff':'#ffddee';
+      ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.fill();
+      // Tiny wings
+      ctx.fillStyle=flash?'#fff':'rgba(255,200,220,0.85)';
+      ctx.beginPath(); ctx.ellipse(-e.w*0.7,-2,e.w*0.5,e.h*0.3,0.3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( e.w*0.7,-2,e.w*0.5,e.h*0.3,-0.3,0,Math.PI*2); ctx.fill();
+      // Eye
+      ctx.fillStyle='#ff4488'; ctx.beginPath(); ctx.arc(2,0,2,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+      // HP bar
+      ctx.fillStyle='#333'; ctx.fillRect(e.x,e.y-6,e.w,3);
+      ctx.fillStyle='#ff88bb'; ctx.fillRect(e.x,e.y-6,e.w*(e.hp/e.maxHp),3);
+      continue;
+    }
+    // FIX 2A: Golem
+    if(e.type==='golem'){
+      const flash=e.hitTimer>0;
+      ctx.save(); ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      if(e.facing===-1) ctx.scale(-1,1);
+      // Aura
+      ctx.globalAlpha=0.15+0.1*Math.sin(s.frameCount*0.06);
+      ctx.fillStyle='#aaccff'; ctx.fillRect(-e.w/2-6,-e.h/2-6,e.w+12,e.h+12); ctx.globalAlpha=1;
+      // Body — cloud bricks
+      ctx.fillStyle=flash?'#fff':'#cce0ff';
+      ctx.fillRect(-e.w/2,-e.h/2,e.w,e.h);
+      // Cloud texture patches
+      if(!flash){
+        ctx.fillStyle='rgba(255,255,255,0.55)';
+        ctx.beginPath(); ctx.ellipse(-e.w/4,-e.h/4,10,7,0,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(e.w/5, e.h/5,8,6,0,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0,-e.h/2+6,12,5,0,0,Math.PI*2); ctx.fill();
+      }
+      // Eyes
+      ctx.fillStyle=flash?'#aaa':'#4466aa';
+      ctx.fillRect(-8,-6,6,8); ctx.fillRect(4,-6,6,8);
+      ctx.restore();
+      // HP bar
+      const hbW=e.w+8; ctx.fillStyle='#333'; ctx.fillRect(e.x-4,e.y-10,hbW,5);
+      ctx.fillStyle='#aaccff'; ctx.fillRect(e.x-4,e.y-10,hbW*(e.hp/e.maxHp),5);
+      ctx.font='bold 9px monospace'; ctx.textAlign='center'; ctx.fillStyle='#88bbff';
+      ctx.fillText('GOLEM',e.x+e.w/2,e.y-13); ctx.textAlign='left';
+      continue;
+    }
+    // FIX 2A: Stormcloud
+    if(e.type==='stormcloud'){
+      const flash=e.hitTimer>0, t2=s.frameCount;
+      ctx.save(); ctx.translate(e.x+e.w/2,e.y+e.h/2);
+      // Cloud body
+      ctx.globalAlpha=0.7+0.15*Math.sin(t2*0.08);
+      ctx.fillStyle=flash?'#fff':'#667799';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=flash?'#fff':'#778899';
+      ctx.beginPath(); ctx.ellipse(-e.w*0.28,-e.h*0.15,e.w*0.3,e.h*0.4,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( e.w*0.25,-e.h*0.1,e.w*0.28,e.h*0.38,0,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1;
+      // Lightning flash when charging (last 20 frames of cooldown)
+      if(e.shootCd>0&&e.shootCd<20){
+        ctx.globalAlpha=0.5*(1-e.shootCd/20);
+        ctx.strokeStyle='#ffff44'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(0,e.h*0.3); ctx.lineTo(-6,e.h*0.6); ctx.lineTo(3,e.h*0.55); ctx.lineTo(-2,e.h*0.9); ctx.stroke();
+        ctx.globalAlpha=1;
+      }
+      ctx.restore();
+      // HP bar
+      ctx.fillStyle='#333'; ctx.fillRect(e.x,e.y-8,e.w,4);
+      ctx.fillStyle='#88aadd'; ctx.fillRect(e.x,e.y-8,e.w*(e.hp/e.maxHp),4);
+      continue;
+    }
     ctx.save();ctx.translate(e.x+e.w/2,e.y+e.h/2);if(e.facing===-1)ctx.scale(-1,1);
+    const tier=e.tier||0,flash=e.hitTimer>0,frozen=e._freeze&&e._freeze.dur>0,t=s.frameCount;
     if(tier>=3&&!flash){ctx.globalAlpha=0.2+0.1*Math.sin(t*0.08);ctx.fillStyle=frozen?'#88ccff':e.color;ctx.fillRect(-e.w/2-8,-e.h/2-8,e.w+16,e.h+16);ctx.globalAlpha=1;}
     ctx.fillStyle=flash?'#ffffff':frozen?'#88ccff':e.color;ctx.fillRect(-e.w/2,-e.h/2,e.w,e.h);
     // Mini-boss crown
@@ -2077,6 +2534,15 @@ function drawProjectiles(s){
       ctx.save();ctx.translate(p.x,p.y);ctx.rotate(Math.atan2(p.vy,p.vx));
       ctx.fillStyle=p.color||'#ffff88';ctx.fillRect(-9,-3,18,6);ctx.fillStyle='#ffffff';ctx.fillRect(-9,-2,7,4);
       ctx.restore();
+    } else if(p.isBolt){
+      // FIX 2A: Lightning bolt visual
+      ctx.save(); ctx.translate(p.x,p.y);
+      ctx.globalAlpha=0.8+0.2*Math.sin(s.frameCount*0.4);
+      ctx.strokeStyle='#ffff44'; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.moveTo(-4,-3); ctx.lineTo(0,0); ctx.lineTo(-3,4); ctx.stroke();
+      ctx.strokeStyle='#ffffff'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(-4,-3); ctx.lineTo(0,0); ctx.lineTo(-3,4); ctx.stroke();
+      ctx.globalAlpha=1; ctx.restore();
     } else {
       ctx.fillStyle=p.color||'#ffee44';ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fill();
       ctx.fillStyle='#fff8';ctx.beginPath();ctx.arc(p.x-p.vx,p.y-p.vy,3,0,Math.PI*2);ctx.fill();
@@ -2088,11 +2554,21 @@ function drawPopups(s){
   if(!s._popups.length) return;
   ctx.textAlign='center';
   for(const p of s._popups){
-    const t=p.life/90;ctx.globalAlpha=Math.min(1,t*3);const scale=1+0.5*(1-t);
-    ctx.font=`bold ${Math.round(13*scale)}px monospace`;ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillText(p.text,p.x+1,p.y+1);
-    ctx.fillStyle=t>0.5?'#ffd700':'#ffec7a';ctx.fillText(p.text,p.x,p.y);
+    const t=p.life/90; ctx.globalAlpha=Math.min(1,t*3);
+    if(p.isDmgNum){
+      // FIX 7C: damage numbers — compact, punchy, colour-coded
+      const sc=(p.scale||1)*(0.8+0.2*(p.life/55));
+      ctx.font=`bold ${Math.round(11*sc)}px monospace`;
+      ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillText(p.text,p.x+1,p.y+1);
+      ctx.fillStyle=p.dmgColor||'#ffffff'; ctx.fillText(p.text,p.x,p.y);
+    } else {
+      const scale=1+0.5*(1-t);
+      ctx.font=`bold ${Math.round(13*scale)}px monospace`;
+      ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillText(p.text,p.x+1,p.y+1);
+      ctx.fillStyle=t>0.5?'#ffd700':'#ffec7a'; ctx.fillText(p.text,p.x,p.y);
+    }
   }
-  ctx.globalAlpha=1;ctx.textAlign='left';
+  ctx.globalAlpha=1; ctx.textAlign='left';
 }
 
 function drawHUD(s){
@@ -2127,9 +2603,9 @@ function drawHUD(s){
     if(h._wingsActive){ctx.fillStyle='#aaddff';ctx.font=`${hSz}px monospace`;ctx.fillText('FLYING',W-8,hintY);}
     ctx.textAlign='left';
   }
-  const meta=loadMeta();
+  // FIX 5B: use state._diamondCount — no loadMeta in draw loop
   ctx.font=`${Math.round(13*sc)}px monospace`;ctx.fillStyle='#cc88ff';ctx.textAlign='right';
-  ctx.fillText('💎 '+meta.diamonds,W-8,H-10);ctx.textAlign='left';
+  ctx.fillText('💎 '+(s._diamondCount||0),W-8,H-10);ctx.textAlign='left';
   let wx=W-8;ctx.textAlign='right';
   for(const w of weapons.reverse()){
     ctx.font=`${iSz}px serif`;ctx.fillText(w.icon,wx,iconY);
@@ -2151,6 +2627,18 @@ function drawHUD(s){
     const bf=s._biomeFlash,a=Math.min(bf/15,1)*Math.min(1,(bf/55)*2)*0.38;
     ctx.save();ctx.globalAlpha=a;ctx.fillStyle=rgb(s._biomeFlashCol);ctx.fillRect(0,0,W,H);ctx.restore();
   }
+  // FIX 8C: boss cinematic intro overlay
+  if(s._bossIntroTimer>0){
+    s._bossIntroTimer--;
+    const a=Math.min(1,s._bossIntroTimer>100?1:(s._bossIntroTimer/30));
+    ctx.save(); ctx.globalAlpha=a*0.7; ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H); ctx.globalAlpha=a;
+    ctx.textAlign='center';
+    ctx.font='bold 28px monospace'; ctx.fillStyle='#ff4400';
+    ctx.fillText(s._bossIntroName||'🐉 BOSS', W/2, H/2-14);
+    ctx.font='14px monospace'; ctx.fillStyle='#ffaa44';
+    ctx.fillText('⚔️ PREPARE FOR BATTLE', W/2, H/2+16);
+    ctx.restore();
+  }
   // FIX #18 B+C: Frenzy overlay when combo >= 25
   if((s._combo||0)>=25){
     ctx.save();ctx.globalAlpha=0.06+0.04*Math.sin(s.frameCount*0.3);ctx.fillStyle='#ff4400';ctx.fillRect(0,0,W,H);ctx.restore();
@@ -2162,6 +2650,7 @@ function drawHUD(s){
 // ============================================================
 function showLevelUp(s){
   s.paused=true;
+  queueSound('levelup'); // FIX 6C
   const screen=document.getElementById('upgrade-screen');
   const cards=document.getElementById('upgrade-cards');
   cards.innerHTML='';
@@ -2234,11 +2723,14 @@ function pauseGame(){
   if(!state||state.dead||state.shopOpen) return;
   state.paused=true;
   document.getElementById('pause-screen').style.display='block';
+  stopMusic(); // FIX 6C — silence music while paused
 }
 function resumeGame(){
   if(!state) return;
   state.paused=false;
   document.getElementById('pause-screen').style.display='none';
+  // FIX 6C — restart music on resume
+  if(state) _hookAudio(state);
 }
 function resumeAndShop(){
   document.getElementById('pause-screen').style.display='none';
@@ -2258,6 +2750,7 @@ function goToMainMenu(){
   updateMenuButtons();
 }
 function showGameOver(s){
+  stopMusic(); // FIX 6C
   checkAchievements(s);
   // FIX #16 A+B+C: Scoring
   const score=calcRunScore(s);
@@ -2300,10 +2793,14 @@ function renderMetaShop(){
   document.getElementById('meta-diamond-count').textContent='💎 Diamonds: '+meta.diamonds;
   const cont=document.getElementById('meta-items'); cont.innerHTML='';
   META_PERKS.forEach(perk=>{
-    const owned=meta.perks[perk.id]||0; const maxed=perk.max!=null&&owned>=perk.max; const can=!maxed&&meta.diamonds>=perk.cost;
-    const div=document.createElement('div'); div.className='shop-item'+(maxed?' maxed':can?'':' cant-afford');
+    const owned=meta.perks[perk.id]||0; const maxed=perk.max!=null&&owned>=perk.max;
+    // FIX 3C: Check achievement gate
+    const gated = perk.gate && !(new Set(meta.achievements||[])).has(perk.gate);
+    const can=!maxed&&!gated&&meta.diamonds>=perk.cost;
+    const div=document.createElement('div'); div.className='shop-item'+(maxed?' maxed':gated?' cant-afford':can?'':' cant-afford');
     const badge=owned>0?(perk.max!=null?`<span class="wlvl">${owned}/${perk.max}</span>`:`<span class="wlvl">${owned}</span>`):'';
-    div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${badge}</div><div class="s-desc">${perk.desc}</div><div class="s-cost">${maxed?'✓ MAX':'💎 '+perk.cost}</div>`;
+    const gateLabel=gated?`<div style="font-size:9px;color:#ff8800;margin-top:3px">🔒 ${ACHIEVEMENTS.find(a=>a.id===perk.gate)?.name||perk.gate}</div>`:'';
+    div.innerHTML=`<div class="s-icon">${perk.icon}</div><div class="s-name">${perk.name} ${badge}</div><div class="s-desc">${perk.desc}</div>${gateLabel}<div class="s-cost">${maxed?'✓ MAX':gated?'🔒 Locked':'💎 '+perk.cost}</div>`;
     if(can) div.onclick=()=>{ meta.diamonds-=perk.cost; meta.perks[perk.id]=(meta.perks[perk.id]||0)+1; saveMeta(meta); renderMetaShop(); };
     cont.appendChild(div);
   });
@@ -2322,14 +2819,14 @@ function renderMetaShop(){
       if(item.type==='skin') meta.activeSkin=item.id;
       else if(item.type==='jumpfx') meta.activeJumpFx=item.id;
       else if(item.type==='trail') meta.activeTrail=item.id;
-      saveMeta(meta); renderMetaShop();
+      saveMeta(meta); if(state) state._activeSkin=meta.activeSkin; renderMetaShop();
     };
     if(can) div.onclick=()=>{
       meta.diamonds-=item.cost; const skins=meta.unlockedSkins||[]; skins.push(item.id); meta.unlockedSkins=skins;
       if(item.type==='skin') meta.activeSkin=item.id;
       else if(item.type==='jumpfx') meta.activeJumpFx=item.id;
       else if(item.type==='trail') meta.activeTrail=item.id;
-      saveMeta(meta); renderMetaShop();
+      saveMeta(meta); if(state) state._activeSkin=meta.activeSkin; renderMetaShop();
     };
     vanityEl.appendChild(div);
   });
@@ -2346,6 +2843,7 @@ function restartGame(applyMeta){
   document.getElementById('upgrade-screen').classList.remove('show');
   document.getElementById('shop-screen').classList.remove('show');
   document.getElementById('pause-screen').style.display='none';
+  stopMusic(); _currentMusicKey=null; // FIX 6C — clear music state on new run
 
   // FIX #6C: Determine start world from saved checkpoint
   const startInSky = getStartWorld() >= 2 && applyMeta;
@@ -2360,15 +2858,259 @@ function restartGame(applyMeta){
 
   // FIX #6C: If starting in sky world, fast-forward state to sky
   if(startInSky && applyMeta){
-    state.distance=7500; // past the boss
+    state.distance=7500;
     state.reachedSkyKingdom=true; state.inSkyKingdom=true;
     state.hero.y=SKY_THRESHOLD-100; state.hero.x=500;
     state.skyEntryX=500;
     state.bossSpawned=true;
   }
+  // Start music for opening biome (only fires if audio was already inited by a prior keypress)
+  setTimeout(()=>{ if(state) _hookAudio(state); }, 300);
 }
 
 function rectOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+// ============================================================
+// FIX 6C: AUDIO SYSTEM — Procedural Web Audio (no files needed)
+// ============================================================
+let audioCtx = null;
+let _musicNodes = {}; // holds running music oscillators
+let _currentBiomeMusic = null;
+let _musicEnabled = true;   // background music on/off
+let _sfxEnabled   = true;   // sound effects on/off
+let _masterGain = null;
+
+// Load audio prefs from meta on startup
+(function loadAudioPrefs(){
+  try{
+    const m = JSON.parse(localStorage.getItem('fwd_meta')||'{}');
+    if(m.musicEnabled===false) _musicEnabled=false;
+    if(m.sfxEnabled===false)   _sfxEnabled=false;
+  } catch(e){}
+})();
+
+function saveAudioPrefs(){
+  const meta=loadMeta(); meta.musicEnabled=_musicEnabled; meta.sfxEnabled=_sfxEnabled; saveMeta(meta);
+}
+
+function toggleMusic(){
+  _musicEnabled=!_musicEnabled;
+  saveAudioPrefs();
+  if(!_musicEnabled) stopMusic();
+  else if(state) _hookAudio(state);
+  _updateAudioToggleUI();
+}
+function toggleSFX(){
+  _sfxEnabled=!_sfxEnabled;
+  saveAudioPrefs();
+  _updateAudioToggleUI();
+}
+function _updateAudioToggleUI(){
+  const mb=document.getElementById('music-toggle-btn');
+  const sb=document.getElementById('sfx-toggle-btn');
+  const ms=document.getElementById('music-toggle-status');
+  const ss=document.getElementById('sfx-toggle-status');
+  if(!mb) return;
+  mb.className='toggle-btn '+(_musicEnabled?'on':'off');
+  sb.className='toggle-btn '+(_sfxEnabled?'on':'off');
+  ms.textContent=_musicEnabled?'ON':'OFF';
+  ss.textContent=_sfxEnabled?'ON':'OFF';
+}
+
+function initAudio(){
+  if(audioCtx) return;
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    _masterGain = audioCtx.createGain();
+    _masterGain.gain.value = 0.08;  // FIX: lower master volume — was 0.18, stacking made it too loud
+    _masterGain.connect(audioCtx.destination);
+  } catch(e){ audioCtx=null; }
+}
+
+// Resume audio context (required by browser autoplay policy)
+function resumeAudio(){ if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }
+
+// Generic tone helper
+function playTone(freq, type, vol, dur, startDelay=0, dest=null){
+  if(!audioCtx||!_sfxEnabled||!_masterGain) return null;
+  try{
+    const g=audioCtx.createGain();
+    g.gain.setValueAtTime(Math.max(0.0001,vol), audioCtx.currentTime+startDelay);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+startDelay+dur);
+    g.connect(dest||_masterGain);
+    const o=audioCtx.createOscillator();
+    o.type=type; o.frequency.value=freq;
+    o.connect(g);
+    o.start(audioCtx.currentTime+startDelay);
+    o.stop(audioCtx.currentTime+startDelay+dur+0.05);
+    return o;
+  } catch(e){ return null; }
+}
+
+// Noise burst for sword/damage
+function playNoise(vol, dur, dest=null){
+  if(!audioCtx||!_sfxEnabled||!_masterGain) return;
+  try{
+    const bufSize=Math.floor(audioCtx.sampleRate*dur);
+    const buf=audioCtx.createBuffer(1,bufSize,audioCtx.sampleRate);
+    const data=buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++) data[i]=(Math.random()*2-1);
+    const src=audioCtx.createBufferSource();
+    src.buffer=buf;
+    const g=audioCtx.createGain();
+    g.gain.setValueAtTime(Math.max(0.0001,vol), audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+dur);
+    const filt=audioCtx.createBiquadFilter();
+    filt.type='bandpass'; filt.frequency.value=800;
+    src.connect(filt); filt.connect(g); g.connect(dest||_masterGain);
+    src.start(); src.stop(audioCtx.currentTime+dur+0.05);
+  } catch(e){ }
+}
+
+// FIX: Sound queue — decouples audio from update() so Web Audio errors never crash game logic
+let _soundQueue = [];
+function queueSound(name){ _soundQueue.push(name); }
+function drainSoundQueue(){
+  // Limit to 4 sounds per frame so rapid coin collection can't flood AudioContext
+  const toPlay = _soundQueue.splice(0, 4);
+  toPlay.forEach(name => { try{ playSound(name); } catch(e){} });
+}
+
+// Named SFX
+function playSound(name){
+  if(!audioCtx||!_sfxEnabled) return;
+  resumeAudio();
+  switch(name){
+    case 'coin':     playTone(1046,'sine',0.35,0.08); playTone(1318,'sine',0.25,0.07,0.06); break;
+    case 'jump':     playTone(220,'sine',0.3,0.06); playTone(330,'sine',0.2,0.09,0.04); break;
+    case 'sword':    playNoise(0.5,0.07); playTone(180,'sawtooth',0.12,0.07); break;
+    case 'gun':      playNoise(0.4,0.04); playTone(440,'square',0.08,0.05); break;
+    case 'fireball': playTone(100,'sawtooth',0.35,0.15); playNoise(0.3,0.12,_masterGain); break;
+    case 'hurt':     playTone(80,'sawtooth',0.5,0.18); playNoise(0.4,0.15); break;
+    case 'kill':     playTone(220,'square',0.22,0.06); playTone(165,'square',0.18,0.05,0.05); break;
+    case 'levelup':
+      [523,659,784,1046].forEach((f,i)=>playTone(f,'sine',0.4,0.18,i*0.12));
+      break;
+    case 'chest':    playTone(659,'triangle',0.4,0.1); playTone(880,'triangle',0.3,0.12,0.08); break;
+    case 'diamond':  [1318,1568,2093].forEach((f,i)=>playTone(f,'sine',0.35,0.12,i*0.07)); break;
+    case 'roar':
+      playTone(55,'sawtooth',0.8,0.6); playTone(40,'square',0.5,0.8,0.1);
+      playNoise(0.6,0.5); break;
+    case 'enrage':
+      [55,65,75].forEach((f,i)=>playTone(f,'sawtooth',0.7,0.4,i*0.1));
+      playNoise(0.5,0.4,_masterGain); break;
+    case 'dawn':
+      [523,659,784,1046,1318].forEach((f,i)=>playTone(f,'sine',0.45,0.25,i*0.08));
+      break;
+    case 'nightfall':
+      [220,175,130].forEach((f,i)=>playTone(f,'sine',0.3,0.35,i*0.12)); break;
+    case 'combo10':  [440,550,660].forEach((f,i)=>playTone(f,'square',0.25,0.1,i*0.06)); break;
+    case 'boss_intro': playTone(55,'sawtooth',0.8,1.2); playNoise(0.5,0.8); break;
+  }
+}
+
+// ---- Biome music system ----
+// Each biome gets a key signature root note and a rhythm pattern
+const BIOME_MUSIC = {
+  'Plains':          {root:261, mode:'major',  tempo:0.48, style:'folk'},
+  'Mountain':        {root:196, mode:'minor',  tempo:0.52, style:'epic'},
+  'Jungle':          {root:220, mode:'major',  tempo:0.38, style:'tribal'},
+  'Volcano':         {root:130, mode:'minor',  tempo:0.58, style:'heavy'},
+  'Snow':            {root:293, mode:'major',  tempo:0.44, style:'gentle'},
+  'Beach':           {root:329, mode:'major',  tempo:0.42, style:'folk'},
+  'Fantasy':         {root:246, mode:'minor',  tempo:0.50, style:'magic'},
+  'Mushroom Kingdom':{root:329, mode:'major',  tempo:0.36, style:'folk'},
+  'Meteor Fields':   {root:164, mode:'minor',  tempo:0.60, style:'heavy'},
+  'Desert':          {root:220, mode:'minor',  tempo:0.46, style:'tribal'},
+  'Crystal Cave':    {root:277, mode:'major',  tempo:0.40, style:'magic'},
+  'Haunted Forest':  {root:185, mode:'minor',  tempo:0.55, style:'heavy'},
+  'Lava World':      {root:138, mode:'minor',  tempo:0.62, style:'heavy'},
+  'Ice Cave':        {root:311, mode:'minor',  tempo:0.44, style:'gentle'},
+  'Cyber City':      {root:293, mode:'minor',  tempo:0.56, style:'epic'},
+  'Ancient Ruins':   {root:207, mode:'minor',  tempo:0.50, style:'epic'},
+  'Cloud Kingdom':   {root:349, mode:'major',  tempo:0.42, style:'gentle'},
+  'Toxic Wasteland': {root:155, mode:'minor',  tempo:0.54, style:'heavy'},
+  'Rainbow Land':    {root:392, mode:'major',  tempo:0.38, style:'folk'},
+  'Shadow Realm':    {root:110, mode:'minor',  tempo:0.62, style:'heavy'},
+  // Sky biomes
+  'Nimbus Fields':   {root:392, mode:'major',  tempo:0.40, style:'gentle'},
+  'Sun Lands':       {root:440, mode:'major',  tempo:0.44, style:'epic'},
+  'Aurora Heights':  {root:370, mode:'major',  tempo:0.46, style:'magic'},
+  "Angel's Realm":   {root:415, mode:'major',  tempo:0.38, style:'gentle'},
+  'Celestial Void':  {root:146, mode:'minor',  tempo:0.52, style:'heavy'},
+};
+
+// Scale intervals
+const SCALES = {
+  major: [0,2,4,5,7,9,11],
+  minor: [0,2,3,5,7,8,10],
+};
+// Melody patterns per style (scale degrees)
+const PATTERNS = {
+  folk:   [0,2,4,2,0,4,2,0],
+  epic:   [0,0,4,7,4,0,3,0],
+  tribal: [0,3,0,5,0,3,7,5],
+  magic:  [4,7,11,9,7,4,2,0],
+  gentle: [0,4,7,4,0,2,4,2],
+  heavy:  [0,0,3,0,7,0,3,5],
+};
+
+let _musicTimer=null;
+let _bassTimer=null;       // FIX: track bass timer so stopMusic can cancel it
+let _musicGen=0;           // FIX: generation counter — orphaned loops self-terminate
+let _melodyStep=0;
+let _bassStep=0;
+let _currentMusicKey=null;
+
+function stopMusic(){
+  _musicGen++;             // invalidates all running beat loops instantly
+  if(_musicTimer){ clearTimeout(_musicTimer); _musicTimer=null; }
+  if(_bassTimer){  clearTimeout(_bassTimer);  _bassTimer=null; }
+  _currentBiomeMusic=null; _currentMusicKey=null; _melodyStep=0; _bassStep=0;
+}
+
+function startBiomeMusic(biomeName, isNight){
+  if(!audioCtx||!_musicEnabled) return;
+  const key = isNight?biomeName+'_night':biomeName;
+  if(_currentMusicKey===key) return;   // already playing this track — do nothing
+  stopMusic();
+  _currentMusicKey=key;
+  const def=BIOME_MUSIC[biomeName];
+  if(!def) return;
+  _currentBiomeMusic=def;
+  const scale=SCALES[def.mode];
+  const pattern=PATTERNS[def.style];
+  const nightShift=isNight?-12:0;
+  const tempoMs=def.tempo*1000*0.72;
+  const myGen=_musicGen;   // capture generation at spawn time
+
+  function beatMelody(){
+    if(myGen!==_musicGen||!audioCtx||!_musicEnabled||!_currentBiomeMusic) return;
+    const deg=scale[pattern[_melodyStep%pattern.length]];
+    const freq=def.root*Math.pow(2,(deg+nightShift)/12);
+    playTone(freq,'triangle',isNight?0.05:0.06,tempoMs*0.5);
+    _melodyStep++;
+    _musicTimer=setTimeout(beatMelody,tempoMs);
+  }
+  function beatBass(){
+    if(myGen!==_musicGen||!audioCtx||!_musicEnabled||!_currentBiomeMusic) return;
+    const bassFreq=(def.root/2)*Math.pow(2,nightShift/12)*(_bassStep%2===0?1:1.5);
+    playTone(bassFreq,'sine',isNight?0.07:0.05,tempoMs*0.75);
+    _bassStep++;
+    _bassTimer=setTimeout(beatBass,tempoMs*2);  // FIX: store bass timer
+  }
+  resumeAudio();
+  _musicTimer=setTimeout(beatMelody, 80);
+  _bassTimer =setTimeout(beatBass,   tempoMs*0.5+80);
+}
+
+// Hook sounds into game events — called from existing functions
+function _hookAudio(s){
+  if(!audioCtx||!s) return;
+  // Biome music
+  const bm=s.inSkyKingdom?getSkyBiome(s.skyDistance):getBiome(s.distance);
+  startBiomeMusic(bm.name, !s.inSkyKingdom&&s._isNight);
+}
 
 // ============================================================
 // MAIN MENU
@@ -2402,6 +3144,7 @@ updateMenuButtons();
 // INPUT
 // ============================================================
 window.addEventListener('keydown',e=>{
+  initAudio(); resumeAudio(); // FIX 6C — init on first key press
   if(state) state.keys[e.key]=true;
   if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
   if((e.key==='b'||e.key==='B')&&state&&!state.dead){ state.shopOpen?closeShop():openShop(); }
@@ -2411,7 +3154,14 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>{ if(state) state.keys[e.key]=false; });
 
-function loop(){ if(state){update(state);draw(state);} requestAnimationFrame(loop); }
+function loop(){
+  try{
+    if(state){ update(state); draw(state); }
+  } catch(e){ console.warn('FORWARD! loop error:', e); }
+  // Drain audio queue OUTSIDE update/draw — audio errors can never affect game state
+  drainSoundQueue();
+  requestAnimationFrame(loop);
+}
 
 // ============================================================
 // MOBILE INPUT
